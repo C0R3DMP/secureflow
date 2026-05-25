@@ -7,7 +7,7 @@ import os
 def get_claude_llm():
     """Claude agent with fallback to Gemini then Ollama."""
     return LLM(
-        model="anthropic/claude-sonnet-4-20250514",
+        model="anthropic/claude-sonnet-4-6",
         temperature=0.7,
         api_key=os.getenv("ANTHROPIC_API_KEY", "")
     )
@@ -26,12 +26,6 @@ def get_ollama_reporter():
         base_url="http://localhost:11434"
     )
 
-def get_ollama_deepseek():
-    """Ollama deepseek-r1 for exploitation analysis."""
-    return LLM(
-        model="ollama/deepseek-r1",
-        base_url="http://localhost:11434"
-    )
 
 class CrewAgents:
     """Define specialized security agents with proper LLM routing."""

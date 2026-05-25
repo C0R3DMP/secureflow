@@ -10,11 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+_DEFAULT_DB = str(Path.home() / ".secureflow" / "crew_context.db")
+
+
 class SharedContext:
     """Shared memory for agents to collaborate and share findings."""
 
-    def __init__(self, db_path: str = "/tmp/crew_context.db"):
+    def __init__(self, db_path: str = _DEFAULT_DB):
         self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self._init_db()
 

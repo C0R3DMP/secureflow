@@ -112,8 +112,7 @@ def completion_with_fallback(messages, model="gemini", temperature=0.7, max_toke
         "ollama/qwen2.5-coder",
     ]
 
-    if OLLAMA_BASE_URL not in "http://localhost":
-        litellm.api_base_for_ollama = OLLAMA_BASE_URL
+    litellm.api_base_for_ollama = OLLAMA_BASE_URL
 
     last_error = None
     for model_name in fallback_models:
@@ -143,9 +142,3 @@ def completion_with_fallback(messages, model="gemini", temperature=0.7, max_toke
     if last_error:
         raise RuntimeError(f"LLM providers failed. Last error: {last_error}")
 
-def validate_mcp_secret(token: str) -> bool:
-    """Validate MCP bearer token."""
-    if not MCP_SECRET:
-        return False
-    expected = f"Bearer {MCP_SECRET}"
-    return token == expected
