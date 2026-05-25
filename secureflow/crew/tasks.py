@@ -1,9 +1,10 @@
 from crewai import Task
 from secureflow.crew.agents import create_agents, create_dev_agents
 
-def create_security_tasks(target: str):
+def create_security_tasks(target: str, agents: dict = None):
     """Create security assessment tasks for the crew."""
-    agents = create_agents()
+    if agents is None:
+        agents = create_agents()
 
     recon_task = Task(
         description=f"""
@@ -91,15 +92,16 @@ def create_recon_tasks(target: str):
 
     return {"recon": recon_task}
 
-def create_crew(target: str):
+def create_crew(target: str, task_callback=None):
     """Factory function to create a full security crew."""
     from crewai import Crew
     agents = create_agents()
-    tasks = create_security_tasks(target)
+    tasks = create_security_tasks(target, agents)
 
     crew = Crew(
         agents=[agents["recon"], agents["analyst"], agents["reporter"]],
         tasks=[tasks["recon"], tasks["analysis"], tasks["reporting"]],
+        task_callback=task_callback,
         verbose=True,
     )
 
@@ -120,9 +122,10 @@ def create_recon_crew(target: str):
     return crew
 
 
-def create_dev_tasks(task: str, language: str, output_dir: str):
+def create_dev_tasks(task: str, language: str, output_dir: str, agents: dict = None):
     """Create development workflow tasks for the crew."""
-    agents = create_dev_agents()
+    if agents is None:
+        agents = create_dev_agents()
 
     architecture_task = Task(
         description=f"""
@@ -237,15 +240,16 @@ def create_code_review_tasks(code: str, language: str):
     return {"review": review_task}
 
 
-def create_dev_crew(task: str, language: str, output_dir: str):
+def create_dev_crew(task: str, language: str, output_dir: str, task_callback=None):
     """Factory function to create a full development crew."""
     from crewai import Crew
     agents = create_dev_agents()
-    tasks = create_dev_tasks(task, language, output_dir)
+    tasks = create_dev_tasks(task, language, output_dir, agents)
 
     crew = Crew(
         agents=[agents["architect"], agents["developer"], agents["reviewer"]],
         tasks=[tasks["architecture"], tasks["implementation"], tasks["review"]],
+        task_callback=task_callback,
         verbose=True,
     )
 

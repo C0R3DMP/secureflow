@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
+import asyncio
 import json
 import logging
 import os
+from queue import Empty, Queue
 from typing import Any
-from fastmcp import FastMCP
-from secureflow.config import validate_mcp_secret, MCP_SECRET
+
+from fastmcp import Context, FastMCP
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+
+from secureflow.config import MCP_SECRET
 from secureflow.crew.orchestrator import CrewOrchestrator
 from secureflow.crew.dev_orchestrator import DevOrchestrator
+from secureflow.crew.tasks import create_crew
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,7 +112,7 @@ def run_recon(target: str) -> dict:
     try:
         logger.info(f"📡 Starting fast recon for target: {target}")
 
-        from crew.tasks import create_recon_crew
+        from secureflow.crew.tasks import create_recon_crew
         from crewai import Crew
 
         crew = create_recon_crew(target)
@@ -142,6 +149,7 @@ def crew_status() -> dict:
         "version": "1.0.0",
         "capabilities": [
             "security_crew",
+            "security_crew_stream",
             "recon",
             "code_dev_crew",
             "code_review",
@@ -150,6 +158,114 @@ def crew_status() -> dict:
         "auth_enabled": bool(MCP_SECRET),
         "message": "CrewAI Distributed Crew MCP Server is running"
     }
+
+
+# --- Phase labels for progress reporting ---
+_SECURITY_PHASES = ["Reconnaissance", "Vulnerability Analysis", "Report Generation"]
+
+
+@app.tool()
+async def run_security_crew_stream(target: str, ctx: Context) -> dict:
+    """
+    Execute full security crew with real-time MCP progress events.
+
+    Emits progress notifications after each phase (recon, analysis, reporting).
+    Use this tool when the MCP client supports streaming/progress events.
+
+    Args:
+        target: Target IP, hostname, or URL to assess
+
+    Returns:
+        dict with status, target, result
+    """
+    event_queue: Queue = Queue()
+    phase_idx = [0]
+
+    def _on_task_complete(_task_output) -> None:
+        idx = phase_idx[0]
+        label = _SECURITY_PHASES[idx] if idx < len(_SECURITY_PHASES) else f"Phase {idx + 1}"
+        event_queue.put((label, idx + 1))
+        phase_idx[0] += 1
+
+    await ctx.info(f"Starting security assessment of {target}...")
+    await ctx.report_progress(0, 3, "Initializing crew")
+
+    loop = asyncio.get_running_loop()
+    crew = create_crew(target, task_callback=_on_task_complete)
+    future = loop.run_in_executor(None, crew.kickoff)
+
+    while not future.done():
+        await asyncio.sleep(0.5)
+        while True:
+            try:
+                label, n = event_queue.get_nowait()
+                await ctx.info(f"✅ {label} complete ({n}/{len(_SECURITY_PHASES)})")
+                await ctx.report_progress(n, len(_SECURITY_PHASES), f"{label} complete")
+            except Empty:
+                break
+
+    # drain any remaining events from the queue
+    while not event_queue.empty():
+        label, n = event_queue.get_nowait()
+        await ctx.info(f"✅ {label} complete ({n}/{len(_SECURITY_PHASES)})")
+        await ctx.report_progress(n, len(_SECURITY_PHASES), f"{label} complete")
+
+    result = await future
+    await ctx.info("✅ Security assessment complete!")
+
+    return {
+        "status": "success",
+        "target": target,
+        "result": str(result),
+    }
+
+
+@app.custom_route("/stream/{target:path}", methods=["GET"])
+async def stream_scan_sse(request: Request) -> StreamingResponse:
+    """
+    HTTP SSE endpoint — streams security scan progress as Server-Sent Events.
+    Testable with: curl -N http://localhost:5000/stream/<target>
+
+    Events format: data: {"event": "<name>", ...}\\n\\n
+    """
+    target = request.path_params["target"]
+    event_queue: Queue = Queue()
+    phase_idx = [0]
+
+    def _on_task_complete(_task_output) -> None:
+        idx = phase_idx[0]
+        label = _SECURITY_PHASES[idx] if idx < len(_SECURITY_PHASES) else f"Phase {idx + 1}"
+        event_queue.put({"event": "phase_complete", "phase": label, "n": idx + 1, "total": 3})
+        phase_idx[0] += 1
+
+    loop = asyncio.get_running_loop()
+    crew = create_crew(target, task_callback=_on_task_complete)
+    future = loop.run_in_executor(None, crew.kickoff)
+
+    async def _generate():
+        yield f"data: {json.dumps({'event': 'start', 'target': target})}\n\n"
+
+        while not future.done():
+            await asyncio.sleep(0.5)
+            while True:
+                try:
+                    payload = event_queue.get_nowait()
+                    yield f"data: {json.dumps(payload)}\n\n"
+                except Empty:
+                    break
+
+        while not event_queue.empty():
+            payload = event_queue.get_nowait()
+            yield f"data: {json.dumps(payload)}\n\n"
+
+        result = await future
+        yield f"data: {json.dumps({'event': 'complete', 'result': str(result)[:500]})}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 @app.tool()
 def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_output") -> dict:

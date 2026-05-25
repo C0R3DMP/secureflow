@@ -4,6 +4,10 @@ SecureFlow is a comprehensive AI-powered system for security assessment and appl
 
 **Status:** ✅ Production-Ready | **Version:** 0.1.0
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests Passing](https://img.shields.io/badge/tests-47%2F47%20passing-brightgreen)](https://github.com/secureflow/secureflow)
+[![GitHub stars](https://img.shields.io/github/stars/secureflow/secureflow?style=social)](https://github.com/secureflow/secureflow)
 ## Features
 
 ### 🔒 Security Assessment Crew
