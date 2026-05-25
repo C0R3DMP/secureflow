@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+include setup.cfg
+include .env.example
+include requirements.txt
+include requirements-dev.txt
+recursive-include docs *.md
+recursive-include secureflow *.py
+recursive-include tests *.py
