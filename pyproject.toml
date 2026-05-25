@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secureflow"
+version = "0.1.0"
+description = "SecureFlow: AI-powered security assessment and application development crew"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "SecureFlow Team", email = "contact@secureflow.ai"}
+]
+keywords = ["ai", "crew", "security", "development", "crewai", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "crewai==0.80.0",
+    "mcp[cli]>=0.5.0",
+    "fastmcp>=0.2.0",
+    "litellm>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "requests>=2.31.0",
+    "click>=8.0.0",
+    "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "isort>=5.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+secureflow = "secureflow.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/secureflow/secureflow"
+Documentation = "https://secureflow.readthedocs.io"
+Repository = "https://github.com/secureflow/secureflow.git"
+Issues = "https://github.com/secureflow/secureflow/issues"
+
+[tool.setuptools]
+packages = ["secureflow", "secureflow.crew"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-v --strict-markers"
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
