@@ -81,8 +81,17 @@ def build(task, language, output):
     try:
         from secureflow.crew.dev_orchestrator import DevOrchestrator
 
+        from secureflow.crew.history import SessionHistory
+
         orchestrator = DevOrchestrator()
         result = orchestrator.run_dev_crew(task, language, output)
+
+        SessionHistory().record(
+            session_type="dev",
+            target=task[:120],
+            status="success" if result.get("status") == "success" else "failed",
+            summary=result.get("error", "")[:200],
+        )
 
         if result.get("status") == "success":
             click.secho("\n✅ Development crew completed successfully!", fg="green", bold=True)
@@ -106,9 +115,17 @@ def scan(target):
 
     try:
         from secureflow.crew.orchestrator import CrewOrchestrator
+        from secureflow.crew.history import SessionHistory
 
         orchestrator = CrewOrchestrator()
         result = orchestrator.run_security_crew(target)
+
+        SessionHistory().record(
+            session_type="security",
+            target=target,
+            status="success" if result.get("success") else "failed",
+            summary=result.get("error", "")[:200],
+        )
 
         if result.get("success"):
             click.secho("\n✅ Security assessment completed!", fg="green", bold=True)
@@ -121,6 +138,41 @@ def scan(target):
         click.secho(f"\n❌ Error: {str(e)}", fg="red", bold=True)
         logger.error(f"Scan command failed: {str(e)}", exc_info=True)
         return 1
+
+
+@cli.command()
+@click.option("--limit", default=20, show_default=True, help="Number of sessions to show")
+@click.option("--type", "session_type", default=None, help="Filter by type: security, dev")
+def history(limit, session_type):
+    """Show history of past scan and build sessions."""
+    from secureflow.crew.history import SessionHistory
+
+    sessions = SessionHistory().get_sessions(limit=limit, session_type=session_type)
+
+    if not sessions:
+        click.secho("\nNo sessions found.", fg="yellow")
+        return
+
+    click.secho("\n" + "=" * 80, fg="cyan")
+    click.secho("SecureFlow Session History", fg="cyan", bold=True)
+    click.secho("=" * 80, fg="cyan")
+    click.secho(
+        f"\n{'ID':<5} {'Type':<10} {'Target / Task':<38} {'Status':<10} Completed",
+        fg="cyan",
+        bold=True,
+    )
+    click.secho("-" * 80, fg="cyan")
+
+    for s in sessions:
+        color = "green" if s["status"] == "success" else "red"
+        target_col = s["target"][:36] + ".." if len(s["target"]) > 38 else s["target"]
+        completed = (s["completed_at"] or "")[:19]
+        click.secho(
+            f"{s['id']:<5} {s['type']:<10} {target_col:<38} {s['status']:<10} {completed}",
+            fg=color,
+        )
+
+    click.secho("")
 
 
 @cli.command()
