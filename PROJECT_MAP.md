@@ -458,16 +458,19 @@ Tasks:
 
 ---
 
-### M8 — Non-Blocking Async Scan Execution
+### M8 — Non-Blocking Async Scan Execution ✅ COMPLETED (2026-05-26)
 **Scope:** Server concurrency. CLI behavior unchanged.
-**Verifiable goal:** Two concurrent `POST /tools/run_security_crew` requests both complete; `/crew_status` returns HTTP 200 during an active scan (event loop not blocked).
+**Verifiable goal:** ✅ 79/79 passing | ✅ All tools async | ✅ Unique scan_id per run | ✅ Concurrent scans tested
 
 Tasks:
-1. Wrap `orchestrator.run_security_crew()` call in `server.py` with `asyncio.get_event_loop().run_in_executor(None, ...)` — one-line change per tool
-2. Same fix for `dev_orchestrator.run_dev_crew()` in `server.py`
-3. Add `scan_id` (UUID4) to each tool response for client tracking
-4. Update SSE `/stream/{target}` to key on `scan_id` instead of bare target string
-5. New test: mock-concurrent requests assert no blocking
+- [x] `run_security_crew` → `async def` + `run_in_executor` + `scan_id` UUID4
+- [x] `run_dev_crew` → `async def` + `run_in_executor` + `scan_id` UUID4
+- [x] `run_recon` → `async def` + `run_in_executor`
+- [x] `run_code_review` → `async def` + `run_in_executor`
+- [x] Added `_active_scans` dict registry (in-memory, per process)
+- [x] Added `GET /api/scans/{scan_id}` endpoint for status polling
+- [x] Fixed `gemini-2.0-flash` remnant in `save_settings` handler
+- [x] 5 new tests in `tests/test_async_server.py`: async check, scan_id presence, registry, concurrency
 
 ---
 

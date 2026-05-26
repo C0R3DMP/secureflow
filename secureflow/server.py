@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from queue import Empty, Queue
 from typing import Any
 
@@ -14,6 +15,9 @@ from secureflow.config import MCP_SECRET
 from secureflow.crew.orchestrator import CrewOrchestrator
 from secureflow.crew.dev_orchestrator import DevOrchestrator
 from secureflow.crew.tasks import create_crew
+
+# Active scan registry: scan_id → {status, target, result}
+_active_scans: dict = {}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,7 +54,7 @@ def check_auth(auth_header: str = None) -> bool:
     return True
 
 @app.tool()
-def run_security_crew(target: str) -> dict:
+async def run_security_crew(target: str) -> dict:
     """
     Execute full collaborative security crew (recon + analysis + reporting) on target.
 
@@ -63,25 +67,26 @@ def run_security_crew(target: str) -> dict:
         target: Target IP, hostname, or URL to assess
 
     Returns:
-        dict with status, findings, session log
+        dict with status, scan_id, findings, session log
     """
+    scan_id = str(uuid.uuid4())
+    _active_scans[scan_id] = {"status": "running", "target": target}
+    logger.info(f"🚀 Starting security crew for target: {target} (scan_id={scan_id})")
+
     try:
-        logger.info(f"🚀 Starting collaborative security crew for target: {target}")
-
-        # Create orchestrator for coordinated multi-agent execution
         orchestrator = CrewOrchestrator()
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, orchestrator.run_security_crew, target)
 
-        # Run the collaborative crew
-        result = orchestrator.run_security_crew(target)
-
-        # Try to send Telegram notification if configured
         telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         if telegram_token and telegram_chat_id:
             orchestrator.send_notification(telegram_token, telegram_chat_id)
 
+        _active_scans[scan_id] = {"status": "complete", "target": target}
         return {
             "status": "success" if result.get("success") else "error",
+            "scan_id": scan_id,
             "target": target,
             "result": result,
             "session_log": orchestrator.log_path if result.get("success") else None,
@@ -90,15 +95,17 @@ def run_security_crew(target: str) -> dict:
 
     except Exception as e:
         logger.error(f"Security crew failed: {str(e)}", exc_info=True)
+        _active_scans[scan_id] = {"status": "error", "target": target, "error": str(e)}
         return {
             "status": "error",
+            "scan_id": scan_id,
             "target": target,
             "error": str(e),
             "message": "Security crew execution failed"
         }
 
 @app.tool()
-def run_recon(target: str) -> dict:
+async def run_recon(target: str) -> dict:
     """
     Execute recon-only crew (fast network scan) on target.
     Useful for quick network discovery without full analysis.
@@ -113,13 +120,12 @@ def run_recon(target: str) -> dict:
         logger.info(f"📡 Starting fast recon for target: {target}")
 
         from secureflow.crew.tasks import create_recon_crew
-        from crewai import Crew
 
+        loop = asyncio.get_running_loop()
         crew = create_recon_crew(target)
-        result = crew.kickoff()
+        result = await loop.run_in_executor(None, crew.kickoff)
 
         logger.info(f"✅ Recon complete for {target}")
-
         return {
             "status": "success",
             "target": target,
@@ -281,7 +287,7 @@ async def stream_scan_sse(request: Request) -> StreamingResponse:
     )
 
 @app.tool()
-def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_output") -> dict:
+async def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_output") -> dict:
     """
     Execute full development crew (architect + developer + reviewer) to build an app.
 
@@ -296,16 +302,21 @@ def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_output") 
         output_dir: Directory where generated files will be saved (default: /tmp/dev_output)
 
     Returns:
-        dict with status, architecture, code, review findings, and output directory
+        dict with status, scan_id, architecture, code, review findings, and output directory
     """
+    scan_id = str(uuid.uuid4())
+    _active_scans[scan_id] = {"status": "running", "task": task}
+    logger.info(f"🚀 Starting development crew for task: {task} (scan_id={scan_id})")
+
     try:
-        logger.info(f"🚀 Starting development crew for task: {task}")
-
         orchestrator = DevOrchestrator()
-        result = orchestrator.run_dev_crew(task, language, output_dir)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, orchestrator.run_dev_crew, task, language, output_dir)
 
+        _active_scans[scan_id] = {"status": "complete", "task": task}
         return {
             "status": "success" if result.get("status") == "success" else "error",
+            "scan_id": scan_id,
             "task": task,
             "language": language,
             "output_dir": output_dir,
@@ -316,8 +327,10 @@ def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_output") 
 
     except Exception as e:
         logger.error(f"Development crew failed: {str(e)}", exc_info=True)
+        _active_scans[scan_id] = {"status": "error", "task": task, "error": str(e)}
         return {
             "status": "error",
+            "scan_id": scan_id,
             "task": task,
             "language": language,
             "error": str(e),
@@ -325,7 +338,7 @@ def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_output") 
         }
 
 @app.tool()
-def run_code_review(code: str, language: str) -> dict:
+async def run_code_review(code: str, language: str) -> dict:
     """
     Review existing code for quality, bugs, and improvements.
 
@@ -342,7 +355,8 @@ def run_code_review(code: str, language: str) -> dict:
         logger.info(f"🔍 Starting code review for {language}")
 
         orchestrator = DevOrchestrator()
-        result = orchestrator.run_code_review(code, language)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, orchestrator.run_code_review, code, language)
 
         return {
             "status": "success" if result.get("status") == "success" else "error",
@@ -419,6 +433,18 @@ async def serve_dashboard_assets(request: Request):
 
     return FileResponse(status_code=404, content=b"Not found")
 
+@app.custom_route("/api/scans/{scan_id}", methods=["GET"])
+async def get_scan_status(request: Request):
+    """Get status of a specific scan by scan_id."""
+    from starlette.responses import JSONResponse
+
+    scan_id = request.path_params["scan_id"]
+    info = _active_scans.get(scan_id)
+    if info is None:
+        return JSONResponse(status_code=404, content={"status": "not_found", "scan_id": scan_id})
+    return JSONResponse({"scan_id": scan_id, **info})
+
+
 @app.custom_route("/api/history", methods=["GET"])
 async def get_scan_history(request: Request):
     """Get scan history from persistent storage."""
@@ -493,7 +519,7 @@ async def save_settings(request: Request):
         claude_key = body.get("claudeKey", "")
         claude_mode = body.get("claudeMode", "api")
         gemini_key = body.get("geminiKey", "")
-        gemini_model = body.get("geminiModel", "gemini-2.0-flash")
+        gemini_model = body.get("geminiModel", "gemini-2.5-flash")
         ollama_url = body.get("ollamaUrl", "http://localhost:11434")
 
         # Update environment
