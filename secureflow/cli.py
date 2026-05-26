@@ -109,13 +109,21 @@ def build(task, language, output):
 
 @cli.command()
 @click.argument("target")
-def scan(target):
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["html", "pdf", "json"], case_sensitive=False),
+    default="html",
+    show_default=True,
+    help="Output report format.",
+)
+def scan(target, fmt):
     """Run security assessment on target."""
     click.secho(f"\n🔒 Starting security assessment of {target}...\n", fg="blue", bold=True)
 
     try:
         from secureflow.crew.orchestrator import CrewOrchestrator
         from secureflow.crew.history import SessionHistory
+        from secureflow.reports import ReportExporter
 
         orchestrator = CrewOrchestrator()
         result = orchestrator.run_security_crew(target)
@@ -128,7 +136,10 @@ def scan(target):
         )
 
         if result.get("success"):
+            exporter = ReportExporter()
+            report_path = exporter.export(fmt, result, target)
             click.secho("\n✅ Security assessment completed!", fg="green", bold=True)
+            click.secho(f"   Report ({fmt.upper()}): {report_path}", fg="green")
             click.secho(f"   Session log: {orchestrator.log_path}", fg="green")
             return 0
         else:

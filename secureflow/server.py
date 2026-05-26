@@ -433,6 +433,58 @@ async def serve_dashboard_assets(request: Request):
 
     return FileResponse(status_code=404, content=b"Not found")
 
+@app.custom_route("/api/reports/export", methods=["GET"])
+async def export_report(request: Request):
+    """
+    Export a completed scan report in the requested format.
+
+    Query params:
+      target  — exact target string used during the scan
+      format  — html | pdf | json  (default: json)
+    """
+    from starlette.responses import FileResponse, JSONResponse
+    from pathlib import Path
+    from secureflow.reports import ReportExporter
+
+    target = request.query_params.get("target", "")
+    fmt = request.query_params.get("format", "json").lower()
+
+    if not target:
+        return JSONResponse(status_code=400, content={"error": "target param required"})
+    if fmt not in ("html", "pdf", "json"):
+        return JSONResponse(status_code=400, content={"error": "format must be html, pdf, or json"})
+
+    # Locate existing HTML report produced by orchestrator
+    from pathlib import Path as _Path
+    default_log_dir = _Path.home() / ".secureflow"
+    stem = target.replace("/", "_").replace(":", "_").replace(" ", "_")
+    html_path = default_log_dir / f"report_{stem}.html"
+
+    # Build a minimal result dict so ReportExporter can work
+    report_html = html_path.read_text(encoding="utf-8") if html_path.exists() else ""
+    result = {
+        "success": bool(report_html),
+        "result": report_html,
+        "report_html": report_html,
+        "report_path": str(html_path),
+        "session_log": "",
+    }
+
+    try:
+        exporter = ReportExporter()
+        out_path = exporter.export(fmt, result, target)
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    media_types = {"html": "text/html", "pdf": "application/pdf", "json": "application/json"}
+    return FileResponse(
+        path=out_path,
+        media_type=media_types[fmt],
+        filename=Path(out_path).name,
+    )
+
+
 @app.custom_route("/api/scans/{scan_id}", methods=["GET"])
 async def get_scan_status(request: Request):
     """Get status of a specific scan by scan_id."""

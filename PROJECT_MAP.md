@@ -474,18 +474,19 @@ Tasks:
 
 ---
 
-### M9 — Report Export (PDF + JSON)
+### M9 — Report Export (PDF + JSON) ✅ COMPLETED (2026-05-26)
 **Scope:** Output format options for CLI and API.
-**Verifiable goal:** `secureflow scan scanme.nmap.org --format pdf` produces a valid PDF in `~/.secureflow/`; `--format json` produces parseable JSON with all findings.
+**Verifiable goal:** ✅ 90/90 passing | ✅ PDF/JSON/HTML generated | ✅ XSS-safe fallback HTML
 
 Tasks:
-1. Add `--format [html|pdf|json]` flag to `secureflow scan` CLI command
-2. PDF backend: `weasyprint>=60.0` added to `[project.optional-dependencies]` as `export` extra
-3. JSON: serialize `SharedContext.export_summary()` to structured dict via `json.dumps`
-4. Expose `GET /api/reports/{target}/export?format=pdf|json` on server
-5. Tests for each export path
-
-**Note:** If `weasyprint` footprint (~20MB) is unacceptable, swap to `fpdf2` (lighter, no CSS).
+- [x] New module `secureflow/reports.py` — `ReportExporter.export(fmt, result, target)` → path
+- [x] `to_html()` — saves/reuses existing HTML, XSS-safe fallback for empty reports
+- [x] `to_pdf()` — weasyprint 68.1, converts HTML string to PDF
+- [x] `to_json()` — structured `{meta, status, summary, session_log, report_path}`
+- [x] CLI `scan` → `--format [html|pdf|json]` option (default: html)
+- [x] Server `GET /api/reports/export?target=...&format=...` endpoint
+- [x] `pyproject.toml` → `[export]` optional extra: `weasyprint>=60.0`
+- [x] 11 tests in `tests/test_reports.py` (HTML, PDF, JSON, XSS, slash targets, invalid format, CLI help)
 
 ---
 
