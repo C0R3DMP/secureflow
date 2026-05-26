@@ -2,13 +2,19 @@ import os
 import time
 import requests
 import litellm
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 MCP_SECRET = os.getenv("MCP_SECRET", "")
+
+# Rate limit tracking
+_rate_limit_fallback = {"gemini_limited": False}
 
 def init_llms():
     """Initialize litellm with fallback chain: Gemini → Ollama local (OpenCode for Analyst)."""
@@ -105,8 +111,61 @@ def call_opencode(prompt: str, opencode_url: str = "http://localhost:4096", max_
     except Exception as e:
         raise RuntimeError(f"OpenCode error: {str(e)}")
 
+def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.0-flash", temperature=0.7, max_tokens=4096):
+    """
+    Create an LLM instance with automatic 429 rate limit fallback.
+    If Gemini returns 429, silently switches to Ollama.
+    """
+    from crewai import LLM
+
+    # Check if we've already hit rate limit and should use Ollama
+    if _rate_limit_fallback.get("gemini_limited") and "gemini" in model.lower():
+        logger.debug("Using Ollama (Gemini rate limited)")
+        return LLM(
+            model="ollama/qwen2.5-coder:7b",
+            base_url=OLLAMA_BASE_URL,
+            temperature=temperature
+        )
+
+    # Try to create Gemini LLM with error handling wrapper
+    if "gemini" in model.lower():
+        class RateLimitFallbackLLM(LLM):
+            def call(self, *args, **kwargs):
+                try:
+                    return super().call(*args, **kwargs)
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if "429" in error_str or "rate limit" in error_str or "quota" in error_str:
+                        logger.info("Gemini rate limit hit (429), switching to Ollama silently")
+                        _rate_limit_fallback["gemini_limited"] = True
+                        fallback_llm = LLM(
+                            model="ollama/qwen2.5-coder:7b",
+                            base_url=OLLAMA_BASE_URL,
+                            temperature=temperature
+                        )
+                        return fallback_llm.call(*args, **kwargs)
+                    raise
+
+        try:
+            return RateLimitFallbackLLM(
+                model=model,
+                api_key=GEMINI_API_KEY,
+                temperature=temperature
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create Gemini LLM: {e}, using Ollama")
+            _rate_limit_fallback["gemini_limited"] = True
+            return LLM(
+                model="ollama/qwen2.5-coder:7b",
+                base_url=OLLAMA_BASE_URL,
+                temperature=temperature
+            )
+
+    return LLM(model=model, temperature=temperature)
+
+
 def completion_with_fallback(messages, model="gemini", temperature=0.7, max_tokens=4096):
-    """Execute completion with automatic fallback routing (Gemini → Ollama)."""
+    """Execute completion with automatic fallback routing (Gemini → Ollama on 429)."""
     fallback_models = [
         "gemini/gemini-2.0-flash",
         "ollama/qwen2.5-coder",
@@ -136,6 +195,10 @@ def completion_with_fallback(messages, model="gemini", temperature=0.7, max_toke
                 )
             return response
         except Exception as e:
+            error_str = str(e).lower()
+            if "429" in error_str or "rate limit" in error_str:
+                logger.info("Gemini rate limit (429) detected, switching to Ollama")
+                _rate_limit_fallback["gemini_limited"] = True
             last_error = e
             continue
 

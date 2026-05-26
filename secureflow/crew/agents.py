@@ -1,5 +1,6 @@
 from crewai import Agent, LLM
 from secureflow.crew.tools import run_nmap_scan, lookup_cves, assess_service
+from secureflow.config import get_llm_with_rate_limit_fallback
 import os
 
 # LLM Configuration with fallback chain: Claude → Gemini → Ollama
@@ -13,10 +14,10 @@ def get_claude_llm():
     )
 
 def get_gemini_llm():
-    """Gemini agent for fast reconnaissance."""
-    return LLM(
+    """Gemini agent with automatic 429 fallback to Ollama."""
+    return get_llm_with_rate_limit_fallback(
         model="gemini/gemini-2.0-flash",
-        api_key=os.getenv("GEMINI_API_KEY", "")
+        temperature=0.7
     )
 
 def get_ollama_reporter():

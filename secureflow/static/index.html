@@ -3,324 +3,573 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecureFlow — Security Assessment Dashboard</title>
+    <title>SecureFlow — Security Assessment</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --border: #30363d;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-red: #f85149;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-primary);
+            color: var(--text-primary);
             min-height: 100vh;
-            padding: 20px;
+            padding: 16px;
+            line-height: 1.6;
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 350px;
             gap: 20px;
         }
 
+        header {
+            grid-column: 1 / -1;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .header-subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
         .panel {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-            padding: 25px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
             display: flex;
             flex-direction: column;
         }
 
         .panel h2 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 24px;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent-blue);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
         }
 
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 16px;
             display: flex;
             flex-direction: column;
         }
 
-        .form-group label {
-            color: #555;
+        label {
+            font-size: 13px;
             font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 14px;
+            margin-bottom: 6px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .form-group input, .form-group select {
-            padding: 12px;
-            border: 2px solid #e0e0e0;
+        input, select {
+            padding: 10px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
             border-radius: 6px;
-            font-size: 14px;
-            transition: border-color 0.3s;
+            color: var(--text-primary);
+            font-size: 13px;
+            transition: border-color 0.2s;
+            font-family: inherit;
         }
 
-        .form-group input:focus, .form-group select:focus {
+        input:focus, select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--accent-blue);
+        }
+
+        input:invalid {
+            border-color: var(--accent-red);
         }
 
         .btn {
-            padding: 12px 24px;
-            border: none;
+            padding: 10px 16px;
+            border: 1px solid var(--border);
+            background: var(--accent-blue);
+            color: white;
             border-radius: 6px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s;
-            font-size: 14px;
+            transition: all 0.2s;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .btn-primary {
-            background: #667eea;
-            color: white;
+        .btn:hover:not(:disabled) {
+            background: #79c0ff;
+            border-color: var(--accent-blue);
         }
 
-        .btn-primary:hover:not(:disabled) {
-            background: #5568d3;
-            transform: translateY(-2px);
-        }
-
-        .btn-primary:disabled {
-            opacity: 0.6;
+        .btn:disabled {
+            opacity: 0.5;
             cursor: not-allowed;
         }
 
-        .progress-container {
+        .status-display {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-idle {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .status-running {
+            background: rgba(212, 153, 34, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .status-success {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--accent-green);
+        }
+
+        .status-error {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--accent-red);
+        }
+
+        .timer {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+        }
+
+        .phases-container {
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 12px;
+            margin-bottom: 20px;
         }
 
         .phase {
-            padding: 15px;
-            background: #f8f9fa;
-            border-left: 4px solid #ddd;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--border);
             border-radius: 4px;
-            transition: all 0.3s;
+            transition: all 0.2s;
         }
 
-        .phase.active {
-            background: #e3f2fd;
-            border-left-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+        .phase.running {
+            border-left-color: var(--accent-yellow);
+            background: rgba(212, 153, 34, 0.1);
         }
 
         .phase.completed {
-            background: #f1f8e9;
-            border-left-color: #4caf50;
+            border-left-color: var(--accent-green);
+            background: rgba(63, 185, 80, 0.1);
+        }
+
+        .phase.error {
+            border-left-color: var(--accent-red);
+            background: rgba(248, 81, 73, 0.1);
+        }
+
+        .phase-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .phase-icon {
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
         }
 
         .phase-title {
             font-weight: 600;
-            color: #333;
-            margin-bottom: 5px;
+            font-size: 13px;
+            flex: 1;
         }
 
         .phase-status {
-            font-size: 13px;
-            color: #666;
+            font-size: 11px;
+            color: var(--text-secondary);
         }
 
-        .spinner {
-            display: inline-block;
-            width: 14px;
-            height: 14px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #667eea;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-right: 8px;
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: var(--bg-primary);
+            border-radius: 2px;
+            overflow: hidden;
         }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent-blue);
+            transition: width 0.3s ease;
+            width: 0%;
         }
 
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
+        .phase.completed .progress-fill {
+            background: var(--accent-green);
+            width: 100%;
+        }
+
+        .phase.error .progress-fill {
+            background: var(--accent-red);
+            width: 100%;
+        }
+
+        .agent-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
             font-size: 12px;
-            font-weight: 600;
+            margin-bottom: 12px;
         }
 
-        .status-idle { background: #e0e0e0; color: #333; }
-        .status-running { background: #fff3cd; color: #856404; }
-        .status-success { background: #d4edda; color: #155724; }
-        .status-error { background: #f8d7da; color: #721c24; }
+        .agent-icon {
+            font-size: 14px;
+        }
+
+        .agent-name {
+            font-weight: 600;
+            color: var(--accent-blue);
+        }
+
+        .terminal {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 600px;
+            overflow-y: auto;
+            line-height: 1.4;
+            margin-top: 20px;
+        }
+
+        .log-line {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 2px;
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+            flex-shrink: 0;
+            min-width: 90px;
+        }
+
+        .log-message {
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .log-error {
+            color: var(--accent-red);
+        }
+
+        .log-success {
+            color: var(--accent-green);
+        }
+
+        .log-info {
+            color: var(--accent-blue);
+        }
+
+        .log-warning {
+            color: var(--accent-yellow);
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
 
         .history-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            max-height: 400px;
+            gap: 8px;
+            max-height: 600px;
             overflow-y: auto;
         }
 
         .history-item {
-            padding: 12px;
-            background: #f5f5f5;
-            border-radius: 6px;
-            border-left: 3px solid #667eea;
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.2s;
+            font-size: 12px;
         }
 
         .history-item:hover {
-            background: #efefef;
-            transform: translateX(4px);
+            background: rgba(88, 166, 255, 0.1);
+            border-color: var(--accent-blue);
         }
 
         .history-target {
             font-weight: 600;
-            color: #333;
-            font-size: 14px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .history-time {
-            font-size: 12px;
-            color: #999;
-            margin-top: 4px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-bottom: 4px;
         }
 
         .history-status {
-            font-size: 11px;
-            margin-top: 4px;
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
         }
 
-        .empty-state {
-            text-align: center;
-            color: #999;
-            padding: 30px 20px;
+        .history-success {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--accent-green);
         }
 
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 10px;
+        .history-error {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--accent-red);
         }
 
         .message-box {
-            padding: 12px;
+            padding: 10px 12px;
             border-radius: 6px;
-            margin-bottom: 10px;
-            font-size: 14px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            border: 1px solid var(--border);
             display: none;
         }
 
         .message-box.show { display: block; }
-        .message-box.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .message-box.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .message-box.error { background: rgba(248, 81, 73, 0.1); border-color: var(--accent-red); color: var(--accent-red); }
+        .message-box.success { background: rgba(63, 185, 80, 0.1); border-color: var(--accent-green); color: var(--accent-green); }
 
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Mobile responsive */
         @media (max-width: 768px) {
-            .container { grid-template-columns: 1fr; }
-            .panel { padding: 20px; }
+            .container {
+                grid-template-columns: 1fr;
+            }
+
+            .terminal {
+                max-height: 300px;
+            }
+
+            .history-list {
+                max-height: 300px;
+            }
         }
 
-        .fullwidth {
-            grid-column: 1 / -1;
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent-yellow);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
         }
 
-        .log-output {
-            background: #1e1e1e;
-            color: #d4d4d4;
-            padding: 15px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            max-height: 200px;
-            overflow-y: auto;
-            margin-top: 10px;
-            line-height: 1.5;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
-
-        .log-line {
-            margin-bottom: 2px;
-        }
-
-        .log-error { color: #ff6b6b; }
-        .log-success { color: #51cf66; }
-        .log-info { color: #74c0fc; }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Scan Control Panel -->
+        <header>
+            <h1>🔒 SecureFlow</h1>
+            <p class="header-subtitle">AI-Powered Security Assessment Platform</p>
+        </header>
+
+        <!-- Main Content Panel -->
         <div class="panel">
-            <h2>🔒 Security Scan</h2>
+            <h2>Security Scan</h2>
+
             <div class="message-box" id="messageBox"></div>
 
+            <!-- Form -->
             <form id="scanForm">
                 <div class="form-group">
                     <label for="target">Target (IP/Domain/URL)</label>
-                    <input type="text" id="target" name="target" placeholder="e.g., scanme.nmap.org" required>
+                    <input
+                        type="text"
+                        id="target"
+                        name="target"
+                        placeholder="e.g., scanme.nmap.org"
+                        pattern="[a-zA-Z0-9\-\.]+(\.[a-zA-Z0-9\-\.]+)*|^(\d{1,3}\.){3}\d{1,3}$"
+                        required
+                        title="Enter a valid domain, URL, or IP address"
+                    >
                 </div>
 
-                <button type="submit" class="btn btn-primary" id="startBtn">
+                <button type="submit" class="btn" id="startBtn">
                     ▶ Start Scan
                 </button>
             </form>
 
-            <div style="margin-top: 20px;">
-                <h3 style="color: #667eea; font-size: 16px; margin-bottom: 12px;">
-                    Current Status: <span class="status-badge status-idle" id="statusBadge">Idle</span>
-                </h3>
-                <div class="progress-container" id="progressContainer">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">⏳</div>
-                        <p>No scan in progress</p>
-                    </div>
+            <!-- Status Display -->
+            <div class="status-display" id="statusDisplay" style="display: none;">
+                <span class="status-badge status-idle" id="statusBadge">Idle</span>
+                <span class="timer" id="timer">00:00</span>
+            </div>
+
+            <!-- Phases -->
+            <div class="phases-container" id="phasesContainer">
+                <div class="empty-state">
+                    <div class="empty-state-icon">⏳</div>
+                    <p>No scan in progress</p>
                 </div>
             </div>
 
-            <div class="log-output" id="logOutput" style="display: none;"></div>
+            <!-- Agent Indicator -->
+            <div class="agent-indicator" id="agentIndicator" style="display: none;">
+                <span class="agent-icon" id="agentIcon">🤖</span>
+                <span class="agent-name" id="agentName">Waiting...</span>
+            </div>
+
+            <!-- Terminal Output -->
+            <div class="terminal" id="terminal" style="display: none;"></div>
         </div>
 
-        <!-- Scan History Panel -->
-        <div class="panel">
-            <h2>📜 Scan History</h2>
-            <div class="history-list" id="historyList">
-                <div class="empty-state">
-                    <div class="empty-state-icon">📭</div>
-                    <p>No scans yet</p>
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="panel">
+                <h2>Scan History</h2>
+                <div class="history-list" id="historyList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>No scans yet</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Configuration
         const CONFIG = {
             apiBase: window.location.origin,
-            sseTimeout: 300000, // 5 minutes
-            historyRefreshInterval: 5000 // 5 seconds
+            sseTimeout: 300000,
+            historyRefreshInterval: 5000
         };
 
-        // State
+        const AGENTS = {
+            recon: { icon: '🔍', name: 'Recon Agent', color: '#d29922' },
+            analyst: { icon: '🔬', name: 'Analyst Agent', color: '#58a6ff' },
+            reporter: { icon: '📊', name: 'Reporter Agent', color: '#3fb950' }
+        };
+
         let state = {
             scanning: false,
             currentTarget: null,
-            phases: {},
+            startTime: null,
+            timerInterval: null,
+            phases: {
+                'Reconnaissance': { status: 'pending', progress: 0, agent: 'recon' },
+                'Vulnerability Analysis': { status: 'pending', progress: 0, agent: 'analyst' },
+                'Report Generation': { status: 'pending', progress: 0, agent: 'reporter' }
+            },
             logs: []
         };
 
-        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
             loadHistory();
             setInterval(loadHistory, CONFIG.historyRefreshInterval);
         });
 
-        // Setup Event Listeners
         function setupEventListeners() {
             document.getElementById('scanForm').addEventListener('submit', startScan);
         }
 
-        // Start Scan
         async function startScan(e) {
             e.preventDefault();
             if (state.scanning) return;
@@ -331,18 +580,31 @@
                 return;
             }
 
+            // Validate target
+            if (!isValidTarget(target)) {
+                showMessage('Invalid target. Use domain, URL, or IP address.', 'error');
+                return;
+            }
+
             state.scanning = true;
             state.currentTarget = target;
+            state.startTime = Date.now();
             state.phases = {
-                'Reconnaissance': { status: 'pending', progress: 0 },
-                'Vulnerability Analysis': { status: 'pending', progress: 0 },
-                'Report Generation': { status: 'pending', progress: 0 }
+                'Reconnaissance': { status: 'pending', progress: 0, agent: 'recon' },
+                'Vulnerability Analysis': { status: 'pending', progress: 0, agent: 'analyst' },
+                'Report Generation': { status: 'pending', progress: 0, agent: 'reporter' }
             };
             state.logs = [];
 
-            updateUI();
             document.getElementById('startBtn').disabled = true;
             document.getElementById('target').disabled = true;
+            document.getElementById('statusDisplay').style.display = 'flex';
+            document.getElementById('terminal').style.display = 'block';
+            document.getElementById('agentIndicator').style.display = 'flex';
+
+            updateStatus('running');
+            updatePhases();
+            startTimer();
 
             try {
                 startSSEStream(target);
@@ -352,14 +614,33 @@
             }
         }
 
-        // Start SSE Stream
+        function isValidTarget(target) {
+            // IP validation
+            const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+            if (ipRegex.test(target)) return true;
+
+            // Domain/URL validation
+            const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+            return domainRegex.test(target);
+        }
+
+        function startTimer() {
+            state.timerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+                const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                const seconds = String(elapsed % 60).padStart(2, '0');
+                document.getElementById('timer').textContent = `${minutes}:${seconds}`;
+            }, 100);
+        }
+
+        function stopTimer() {
+            if (state.timerInterval) {
+                clearInterval(state.timerInterval);
+            }
+        }
+
         function startSSEStream(target) {
             const eventSource = new EventSource(`${CONFIG.apiBase}/stream/${encodeURIComponent(target)}`);
-            let phaseIndex = 0;
-
-            eventSource.addEventListener('open', () => {
-                addLog('Connected to scan stream', 'info');
-            });
 
             eventSource.addEventListener('message', (event) => {
                 try {
@@ -367,23 +648,24 @@
 
                     if (data.event === 'start') {
                         addLog(`Starting scan of ${data.target}`, 'info');
-                        updateStatus('running');
                     } else if (data.event === 'phase_complete') {
                         const phaseName = data.phase;
                         if (state.phases[phaseName]) {
                             state.phases[phaseName].status = 'completed';
                             state.phases[phaseName].progress = 100;
+                            addLog(`✓ ${phaseName} complete`, 'success');
                         }
-                        addLog(`✓ ${phaseName} complete (${data.n}/${data.total})`, 'success');
-                        updateUI();
+                        updatePhases();
                     } else if (data.event === 'complete') {
-                        addLog('Scan completed successfully!', 'success');
+                        addLog('✅ Scan completed successfully!', 'success');
                         updateStatus('success');
+                        stopTimer();
                         resetScan();
                         loadHistory();
                     } else if (data.event === 'error') {
-                        addLog(`Error: ${data.message}`, 'error');
+                        addLog(`❌ Error: ${data.message || 'Unknown error'}`, 'error');
                         updateStatus('error');
+                        stopTimer();
                         resetScan();
                     }
                 } catch (e) {
@@ -392,36 +674,41 @@
             });
 
             eventSource.addEventListener('error', () => {
-                addLog('Connection lost', 'error');
-                updateStatus('error');
+                if (state.scanning) {
+                    addLog('Connection lost', 'error');
+                    updateStatus('error');
+                }
                 eventSource.close();
+                stopTimer();
                 resetScan();
             });
 
-            // Auto-close after timeout
             setTimeout(() => {
                 if (state.scanning) {
                     eventSource.close();
+                    stopTimer();
+                    resetScan();
                 }
             }, CONFIG.sseTimeout);
         }
 
-        // Add Log Entry
         function addLog(message, type = 'info') {
             const timestamp = new Date().toLocaleTimeString();
             state.logs.push({ timestamp, message, type });
 
-            const logOutput = document.getElementById('logOutput');
-            logOutput.style.display = 'block';
-
+            const terminal = document.getElementById('terminal');
             const logLine = document.createElement('div');
             logLine.className = `log-line log-${type}`;
-            logLine.textContent = `[${timestamp}] ${message}`;
-            logOutput.appendChild(logLine);
-            logOutput.scrollTop = logOutput.scrollHeight;
+            logLine.innerHTML = `<span class="log-time">[${timestamp}]</span><span class="log-message">${escapeHtml(message)}</span>`;
+            terminal.appendChild(logLine);
+            terminal.scrollTop = terminal.scrollHeight;
         }
 
-        // Update Status Badge
+        function escapeHtml(text) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
         function updateStatus(status) {
             const badge = document.getElementById('statusBadge');
             badge.className = `status-badge status-${status}`;
@@ -433,27 +720,46 @@
             }[status] || 'Unknown';
         }
 
-        // Update UI
-        function updateUI() {
-            const container = document.getElementById('progressContainer');
+        function updatePhases() {
+            const container = document.getElementById('phasesContainer');
             container.innerHTML = '';
 
             Object.entries(state.phases).forEach(([name, phase]) => {
+                const agent = AGENTS[phase.agent] || {};
                 const phaseEl = document.createElement('div');
-                phaseEl.className = `phase ${phase.status === 'completed' ? 'completed' : ''}`;
+                phaseEl.className = `phase ${phase.status}`;
 
-                const statusIcon = phase.status === 'completed' ? '✓' : (phase.status === 'pending' ? '◯' : '<span class="spinner"></span>');
+                const statusIcon = {
+                    'pending': '◯',
+                    'running': '<span class="spinner"></span>',
+                    'completed': '✓',
+                    'error': '✗'
+                }[phase.status] || '?';
 
                 phaseEl.innerHTML = `
-                    <div class="phase-title">${statusIcon} ${name}</div>
-                    <div class="phase-status">${phase.status.charAt(0).toUpperCase() + phase.status.slice(1)}</div>
+                    <div class="phase-header">
+                        <span class="phase-icon">${statusIcon}</span>
+                        <span class="phase-title">${name}</span>
+                        <span class="phase-status">${phase.status}</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${phase.progress}%"></div>
+                    </div>
                 `;
 
                 container.appendChild(phaseEl);
             });
+
+            // Update agent indicator
+            const currentPhase = Object.entries(state.phases).find(([_, p]) => p.status === 'running');
+            if (currentPhase) {
+                const agent = AGENTS[currentPhase[1].agent];
+                document.getElementById('agentIcon').textContent = agent.icon;
+                document.getElementById('agentName').textContent = agent.name;
+                document.getElementById('agentIndicator').style.display = 'flex';
+            }
         }
 
-        // Reset Scan
         function resetScan() {
             state.scanning = false;
             state.currentTarget = null;
@@ -461,20 +767,21 @@
             document.getElementById('target').disabled = false;
         }
 
-        // Reset UI
         function resetUI() {
             resetScan();
             updateStatus('idle');
-            document.getElementById('progressContainer').innerHTML = `
+            stopTimer();
+            document.getElementById('statusDisplay').style.display = 'none';
+            document.getElementById('phasesContainer').innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">⏳</div>
                     <p>No scan in progress</p>
                 </div>
             `;
-            document.getElementById('logOutput').style.display = 'none';
+            document.getElementById('terminal').style.display = 'none';
+            document.getElementById('agentIndicator').style.display = 'none';
         }
 
-        // Load History
         async function loadHistory() {
             try {
                 const response = await fetch(`${CONFIG.apiBase}/api/history`);
@@ -496,15 +803,13 @@
                 historyList.innerHTML = data.sessions.map(session => {
                     const date = new Date(session.timestamp);
                     const timeStr = date.toLocaleString();
-                    const statusClass = `status-${session.status}`;
+                    const statusClass = `history-${session.status}`;
 
                     return `
                         <div class="history-item">
-                            <div class="history-target">🎯 ${session.target}</div>
+                            <div class="history-target">🎯 ${escapeHtml(session.target)}</div>
                             <div class="history-time">${timeStr}</div>
-                            <div class="history-status">
-                                <span class="status-badge ${statusClass}">${session.status.toUpperCase()}</span>
-                            </div>
+                            <span class="history-status ${statusClass}">${session.status.toUpperCase()}</span>
                         </div>
                     `;
                 }).join('');
@@ -513,7 +818,6 @@
             }
         }
 
-        // Show Message
         function showMessage(message, type) {
             const box = document.getElementById('messageBox');
             box.textContent = message;
