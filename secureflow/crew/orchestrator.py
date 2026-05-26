@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from secureflow.crew.memory import SharedContext
 from secureflow.crew.tasks import create_crew
+from secureflow.crew.history import SessionHistory
 
 _DEFAULT_LOG = str(Path.home() / ".secureflow" / "crew_session.log")
 
@@ -67,6 +68,16 @@ class CrewOrchestrator:
             self.log("INFO", "✅ Security crew completed successfully!")
             self.log("INFO", f"Session log: {self.log_path}")
 
+            # Record in persistent history
+            history = SessionHistory()
+            summary = str(result)[:500] if result else "Assessment complete"
+            history.record(
+                session_type="security",
+                target=target,
+                status="success",
+                summary=summary
+            )
+
             return {
                 "success": True,
                 "target": target,
@@ -76,6 +87,16 @@ class CrewOrchestrator:
 
         except Exception as e:
             self.log("ERROR", f"Crew execution failed: {str(e)}")
+
+            # Record failed session in history
+            history = SessionHistory()
+            history.record(
+                session_type="security",
+                target=target,
+                status="error",
+                summary=f"Error: {str(e)[:500]}"
+            )
+
             return {
                 "success": False,
                 "error": str(e),

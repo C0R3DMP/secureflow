@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureFlow — Security Assessment Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            color: #555;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .form-group input, .form-group select {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .phase {
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 4px solid #ddd;
+            border-radius: 4px;
+            transition: all 0.3s;
+        }
+
+        .phase.active {
+            background: #e3f2fd;
+            border-left-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+        }
+
+        .phase.completed {
+            background: #f1f8e9;
+            border-left-color: #4caf50;
+        }
+
+        .phase-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .phase-status {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-idle { background: #e0e0e0; color: #333; }
+        .status-running { background: #fff3cd; color: #856404; }
+        .status-success { background: #d4edda; color: #155724; }
+        .status-error { background: #f8d7da; color: #721c24; }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .history-item {
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .history-item:hover {
+            background: #efefef;
+            transform: translateX(4px);
+        }
+
+        .history-target {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .history-time {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .history-status {
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #999;
+            padding: 30px 20px;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .message-box {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .message-box.show { display: block; }
+        .message-box.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .message-box.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        @media (max-width: 768px) {
+            .container { grid-template-columns: 1fr; }
+            .panel { padding: 20px; }
+        }
+
+        .fullwidth {
+            grid-column: 1 / -1;
+        }
+
+        .log-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+            line-height: 1.5;
+        }
+
+        .log-line {
+            margin-bottom: 2px;
+        }
+
+        .log-error { color: #ff6b6b; }
+        .log-success { color: #51cf66; }
+        .log-info { color: #74c0fc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Scan Control Panel -->
+        <div class="panel">
+            <h2>🔒 Security Scan</h2>
+            <div class="message-box" id="messageBox"></div>
+
+            <form id="scanForm">
+                <div class="form-group">
+                    <label for="target">Target (IP/Domain/URL)</label>
+                    <input type="text" id="target" name="target" placeholder="e.g., scanme.nmap.org" required>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="startBtn">
+                    ▶ Start Scan
+                </button>
+            </form>
+
+            <div style="margin-top: 20px;">
+                <h3 style="color: #667eea; font-size: 16px; margin-bottom: 12px;">
+                    Current Status: <span class="status-badge status-idle" id="statusBadge">Idle</span>
+                </h3>
+                <div class="progress-container" id="progressContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⏳</div>
+                        <p>No scan in progress</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-output" id="logOutput" style="display: none;"></div>
+        </div>
+
+        <!-- Scan History Panel -->
+        <div class="panel">
+            <h2>📜 Scan History</h2>
+            <div class="history-list" id="historyList">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <p>No scans yet</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const CONFIG = {
+            apiBase: window.location.origin,
+            sseTimeout: 300000, // 5 minutes
+            historyRefreshInterval: 5000 // 5 seconds
+        };
+
+        // State
+        let state = {
+            scanning: false,
+            currentTarget: null,
+            phases: {},
+            logs: []
+        };
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            loadHistory();
+            setInterval(loadHistory, CONFIG.historyRefreshInterval);
+        });
+
+        // Setup Event Listeners
+        function setupEventListeners() {
+            document.getElementById('scanForm').addEventListener('submit', startScan);
+        }
+
+        // Start Scan
+        async function startScan(e) {
+            e.preventDefault();
+            if (state.scanning) return;
+
+            const target = document.getElementById('target').value.trim();
+            if (!target) {
+                showMessage('Please enter a target', 'error');
+                return;
+            }
+
+            state.scanning = true;
+            state.currentTarget = target;
+            state.phases = {
+                'Reconnaissance': { status: 'pending', progress: 0 },
+                'Vulnerability Analysis': { status: 'pending', progress: 0 },
+                'Report Generation': { status: 'pending', progress: 0 }
+            };
+            state.logs = [];
+
+            updateUI();
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('target').disabled = true;
+
+            try {
+                startSSEStream(target);
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+                resetUI();
+            }
+        }
+
+        // Start SSE Stream
+        function startSSEStream(target) {
+            const eventSource = new EventSource(`${CONFIG.apiBase}/stream/${encodeURIComponent(target)}`);
+            let phaseIndex = 0;
+
+            eventSource.addEventListener('open', () => {
+                addLog('Connected to scan stream', 'info');
+            });
+
+            eventSource.addEventListener('message', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.event === 'start') {
+                        addLog(`Starting scan of ${data.target}`, 'info');
+                        updateStatus('running');
+                    } else if (data.event === 'phase_complete') {
+                        const phaseName = data.phase;
+                        if (state.phases[phaseName]) {
+                            state.phases[phaseName].status = 'completed';
+                            state.phases[phaseName].progress = 100;
+                        }
+                        addLog(`✓ ${phaseName} complete (${data.n}/${data.total})`, 'success');
+                        updateUI();
+                    } else if (data.event === 'complete') {
+                        addLog('Scan completed successfully!', 'success');
+                        updateStatus('success');
+                        resetScan();
+                        loadHistory();
+                    } else if (data.event === 'error') {
+                        addLog(`Error: ${data.message}`, 'error');
+                        updateStatus('error');
+                        resetScan();
+                    }
+                } catch (e) {
+                    console.error('Parse error:', e);
+                }
+            });
+
+            eventSource.addEventListener('error', () => {
+                addLog('Connection lost', 'error');
+                updateStatus('error');
+                eventSource.close();
+                resetScan();
+            });
+
+            // Auto-close after timeout
+            setTimeout(() => {
+                if (state.scanning) {
+                    eventSource.close();
+                }
+            }, CONFIG.sseTimeout);
+        }
+
+        // Add Log Entry
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            state.logs.push({ timestamp, message, type });
+
+            const logOutput = document.getElementById('logOutput');
+            logOutput.style.display = 'block';
+
+            const logLine = document.createElement('div');
+            logLine.className = `log-line log-${type}`;
+            logLine.textContent = `[${timestamp}] ${message}`;
+            logOutput.appendChild(logLine);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        // Update Status Badge
+        function updateStatus(status) {
+            const badge = document.getElementById('statusBadge');
+            badge.className = `status-badge status-${status}`;
+            badge.textContent = {
+                idle: 'Idle',
+                running: '🔄 Running',
+                success: '✓ Success',
+                error: '✗ Error'
+            }[status] || 'Unknown';
+        }
+
+        // Update UI
+        function updateUI() {
+            const container = document.getElementById('progressContainer');
+            container.innerHTML = '';
+
+            Object.entries(state.phases).forEach(([name, phase]) => {
+                const phaseEl = document.createElement('div');
+                phaseEl.className = `phase ${phase.status === 'completed' ? 'completed' : ''}`;
+
+                const statusIcon = phase.status === 'completed' ? '✓' : (phase.status === 'pending' ? '◯' : '<span class="spinner"></span>');
+
+                phaseEl.innerHTML = `
+                    <div class="phase-title">${statusIcon} ${name}</div>
+                    <div class="phase-status">${phase.status.charAt(0).toUpperCase() + phase.status.slice(1)}</div>
+                `;
+
+                container.appendChild(phaseEl);
+            });
+        }
+
+        // Reset Scan
+        function resetScan() {
+            state.scanning = false;
+            state.currentTarget = null;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('target').disabled = false;
+        }
+
+        // Reset UI
+        function resetUI() {
+            resetScan();
+            updateStatus('idle');
+            document.getElementById('progressContainer').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">⏳</div>
+                    <p>No scan in progress</p>
+                </div>
+            `;
+            document.getElementById('logOutput').style.display = 'none';
+        }
+
+        // Load History
+        async function loadHistory() {
+            try {
+                const response = await fetch(`${CONFIG.apiBase}/api/history`);
+                if (!response.ok) throw new Error('Failed to load history');
+
+                const data = await response.json();
+                const historyList = document.getElementById('historyList');
+
+                if (!data.sessions || data.sessions.length === 0) {
+                    historyList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <p>No scans yet</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                historyList.innerHTML = data.sessions.map(session => {
+                    const date = new Date(session.timestamp);
+                    const timeStr = date.toLocaleString();
+                    const statusClass = `status-${session.status}`;
+
+                    return `
+                        <div class="history-item">
+                            <div class="history-target">🎯 ${session.target}</div>
+                            <div class="history-time">${timeStr}</div>
+                            <div class="history-status">
+                                <span class="status-badge ${statusClass}">${session.status.toUpperCase()}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Error loading history:', error);
+            }
+        }
+
+        // Show Message
+        function showMessage(message, type) {
+            const box = document.getElementById('messageBox');
+            box.textContent = message;
+            box.className = `message-box show ${type}`;
+            setTimeout(() => box.classList.remove('show'), 4000);
+        }
+    </script>
+</body>
+</html>

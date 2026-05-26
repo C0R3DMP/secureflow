@@ -348,6 +348,51 @@ def run_code_review(code: str, language: str) -> dict:
             "message": "Code review execution failed"
         }
 
+@app.custom_route("/ui", methods=["GET"])
+async def serve_dashboard(request: Request):
+    """Serve the SecureFlow dashboard UI."""
+    from starlette.responses import FileResponse
+    from pathlib import Path
+
+    dashboard_path = Path(__file__).parent / "static" / "index.html"
+    if not dashboard_path.exists():
+        return FileResponse(
+            status_code=404,
+            content=b"Dashboard not found"
+        )
+
+    return FileResponse(dashboard_path, media_type="text/html")
+
+@app.custom_route("/api/history", methods=["GET"])
+async def get_scan_history(request: Request):
+    """Get scan history from persistent storage."""
+    from starlette.responses import JSONResponse
+    from secureflow.crew.history import SessionHistory
+
+    try:
+        history = SessionHistory()
+        sessions = history.get_sessions(limit=50)
+
+        return JSONResponse({
+            "status": "success",
+            "sessions": [
+                {
+                    "id": s.get("id"),
+                    "target": s.get("target"),
+                    "timestamp": s.get("started_at"),
+                    "status": s.get("status"),
+                    "summary": s.get("summary", "")[:200]
+                }
+                for s in sessions
+            ]
+        })
+    except Exception as e:
+        logger.error(f"History fetch failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
+
 def main():
     """Run the FastMCP server on 0.0.0.0:5000 with SSE transport."""
     import asyncio
@@ -357,6 +402,7 @@ def main():
     logger.info("Transport: SSE")
     logger.info("Host: 0.0.0.0")
     logger.info("Port: 5000")
+    logger.info("Dashboard: http://localhost:5000/ui")
 
     asyncio.run(
         app.run_http_async(

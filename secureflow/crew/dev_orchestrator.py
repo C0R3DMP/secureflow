@@ -6,6 +6,7 @@ from datetime import datetime
 from secureflow.crew.memory import SharedContext
 from secureflow.crew.tasks import create_dev_crew, create_code_review_tasks
 from secureflow.crew.agents import DevAgents
+from secureflow.crew.history import SessionHistory
 from crewai import Crew
 
 _DEFAULT_LOG = str(Path.home() / ".secureflow" / "dev_session.log")
@@ -78,10 +79,30 @@ class DevOrchestrator:
             self.logger.info("🎉 DEVELOPMENT WORKFLOW COMPLETE")
             self.logger.info("=" * 80)
 
+            # Record in persistent history
+            history = SessionHistory()
+            summary = str(result)[:500] if result else "Development complete"
+            history.record(
+                session_type="development",
+                target=f"{language}: {task[:100]}",
+                status="success",
+                summary=summary
+            )
+
             return self._format_final_result(str(result), "success")
 
         except Exception as e:
             self.logger.error(f"Dev crew failed: {str(e)}", exc_info=True)
+
+            # Record failed session in history
+            history = SessionHistory()
+            history.record(
+                session_type="development",
+                target=f"{language}: {task[:100]}",
+                status="error",
+                summary=f"Error: {str(e)[:500]}"
+            )
+
             return self._format_final_result(str(e), "error")
 
     def run_code_review(self, code: str, language: str) -> Dict[str, Any]:

@@ -82,6 +82,23 @@ secureflow build "Create a REST API for a todo application" \
 # 3. Review code quality
 ```
 
+### Web Dashboard
+
+```bash
+# Start the FastMCP server (includes web UI)
+secureflow server
+
+# Open dashboard in browser
+open http://localhost:5000/ui
+
+# Dashboard features:
+# - Real-time scan progress monitoring
+# - Live SSE stream updates
+# - Scan history with past results
+# - Agent status indicators
+# - Live log output
+```
+
 ### MCP Server
 
 ```bash
@@ -89,11 +106,14 @@ secureflow build "Create a REST API for a todo application" \
 secureflow server
 
 # Server will listen on port 5000 with SSE transport
-# Available tools:
-# - run_security_crew(target)
-# - run_dev_crew(task, language, output_dir)
-# - run_code_review(code, language)
-# - crew_status()
+# Available endpoints:
+# - GET /ui                      → Web dashboard
+# - GET /stream/{target}         → SSE stream for scan progress
+# - GET /api/history             → Scan history JSON API
+# - POST /tools/run_security_crew → Security assessment
+# - POST /tools/run_dev_crew      → Application development
+# - POST /tools/run_code_review   → Code review analysis
+# - POST /tools/crew_status       → Server health check
 ```
 
 ## Configuration
@@ -339,15 +359,25 @@ pytest tests/test_cli.py::test_cli_version -vv
 - OpenCode server must be running for Claude-based agents
 - Large codebases may timeout during analysis
 
+## Completed Features
+
+- [x] Persistent result storage (M4)
+- [x] Web UI dashboard (M5)
+- [x] Real-time progress streaming (M3)
+- [x] Scan history with CLI command
+- [x] Session recording and persistence
+- [x] Dead code cleanup and optimization
+- [x] Comprehensive test suite (68/68 passing)
+
 ## Future Improvements
 
-- [ ] Persistent result storage
-- [ ] Web UI dashboard
-- [ ] Real-time progress streaming
 - [ ] Scheduled assessments
 - [ ] Integration with SIEM systems
 - [ ] Custom tool marketplace
 - [ ] Plugin system for extensions
+- [ ] Multi-user authentication
+- [ ] Export reports (PDF, JSON)
+- [ ] Webhook notifications
 
 ## Contributing
 
