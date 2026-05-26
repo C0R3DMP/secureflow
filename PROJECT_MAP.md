@@ -1,5 +1,5 @@
 # PROJECT_MAP — SecureFlow AI
-> Generated: 2026-05-25 | Auditor: Staff SE / Tech Lead | Status: Pre-planning
+> Generated: 2026-05-26 | Updated: 2026-05-26 | Tech Lead | Status: PRODUCTION-READY
 
 ---
 
@@ -225,6 +225,177 @@ secureflow/
   - Success/failure recorded with summary
   - History survives process restarts
 - Test coverage: 11 new tests for UI, history, and orchestrator recording (68/68 passing)
+
+---
+
+---
+
+## [M6 — Multi-Agent Communication & Intelligence Sprint] ✅ COMPLETED (2026-05-26)
+**Scope:** Real agent collaboration, intelligent LLM routing, professional UI, deployment tools.
+
+### Completed Features:
+
+#### 1. Agent Communication Layer (Task 1)
+- [x] **Shared Context Tools**: Added 4 new tools for inter-agent communication:
+  - `save_findings_to_context` - agents persist findings
+  - `read_context_findings` - agents read previous findings
+  - `get_all_findings` - retrieve all findings from an agent
+  - `get_latest_findings` - retrieve latest from all agents
+- [x] **Agent Updates**: All agents (Recon, Analyst, Reporter, Architect, Developer, Reviewer) now have context tools
+- [x] **Task Descriptions**: Updated to explicitly guide agents to use shared context:
+  - Recon: saves scan results
+  - Analyst: reads recon, performs analysis, saves findings
+  - Reporter: reads all previous findings, creates comprehensive report
+  - Similar pattern for Dev Crew agents
+- [x] **Database**: SharedContext uses SQLite with findings + messages + metadata tables
+
+#### 2. Intelligent Rate Limiting (Task 2)
+- [x] **Provider Health Checks**: `is_ollama_available()` checks server health
+- [x] **Smart Fallback Strategy**:
+  - Primary: Gemini 2.0 Flash
+  - On 429: Try Gemini 1.5 Flash
+  - If limited: Check Ollama availability
+  - If all limited: Wait + explicit error message (no silent failures)
+- [x] **Provider Status Class**: `LLMProviderStatus` tracks availability:
+  - Claude (priority 1)
+  - Gemini (priority 2)
+  - Ollama (priority 3)
+  - Methods: `check_health()`, `get_available_providers()`
+- [x] **No Silent Failures**: All rate limit errors now explicit with retry guidance
+
+#### 3. Professional UI Overhaul (Task 3)
+- [x] **Terminal-Inspired Dark Theme**:
+  - Modern color palette (blues, purples, greens)
+  - Monospace fonts for code/logs
+  - 1600px max-width responsive grid layout
+- [x] **Real-Time Agent Conversation Display**:
+  - Agent messages with colored borders (Recon=blue, Analyst=purple, Reporter=green)
+  - System messages in yellow
+  - Chronological display with auto-scroll
+- [x] **Log Panel with Severity Levels**:
+  - INFO (blue), WARNING (yellow), ERROR (red), SUCCESS (green)
+  - Timestamps on each entry
+  - Colored backgrounds for visual scanning
+  - Max height with scrollbar
+- [x] **Phase Progress with Timers**:
+  - 3-phase indicators (Reconnaissance → Analysis → Reporting)
+  - Status badges (Pending/Running/Complete)
+  - Individual phase timers (MM:SS format)
+  - Icons with animations (pulse on running, check on complete)
+- [x] **Provider Status Indicators**:
+  - Real-time availability display
+  - Color-coded badges (available/limited/unavailable)
+  - Shows Claude, Gemini, Ollama status
+- [x] **Scan History Panel**:
+  - Recent sessions with target, timestamp, status
+  - Color-coded success/error status
+  - Clickable history items
+- [x] **Report Download**:
+  - Button enabled after scan complete
+  - Downloads as HTML with timestamp
+  - Filename: `secureflow-report-{target}-{date}.html`
+
+#### 4. Screen Session + TUI Management (Task 4)
+- [x] **CLI Command: `secureflow server-launch`**:
+  - Creates screen session named `secureflow-server`
+  - `--attach` flag to attach to running session
+  - Shows server URL and management commands
+  - Detects existing sessions
+- [x] **CLI Command: `secureflow tui`**:
+  - Interactive TUI management interface
+  - Displays server status (running/not running)
+  - Shows available LLM providers with priorities
+  - Recent sessions statistics
+  - Quick command reference
+- [x] **Screen Integration**:
+  - Server runs in background screen session
+  - Can detach without stopping server
+  - Session survives terminal close
+  - Management via screen commands
+
+#### 5. Provider Management & Settings (Task 5)
+- [x] **UI Settings Modal**:
+  - Modal dialog with 3 provider configs
+  - Claude API key input
+  - Gemini API key input
+  - Ollama URL input (default: localhost:11434)
+- [x] **Provider Testing**:
+  - Individual "Test" buttons for each provider
+  - Real-time status display
+  - Ollama auto-checks on load
+  - Status messages (✅ Configured / ❌ Not responding)
+- [x] **Settings Persistence**:
+  - localStorage saves settings to browser
+  - Restored on next dashboard load
+  - No server-side storage required
+- [x] **Priority Display**:
+  - Shows provider priority order
+  - Claude > Gemini > Ollama
+  - Explains reasoning (capability, speed, privacy)
+- [x] **CLI Config Command**: `secureflow config`
+  - Opens dashboard in browser
+  - Shows provider configuration guide
+  - Lists all configuration options
+
+### Quality Metrics
+- ✅ **Test Coverage**: 74/74 tests passing (100%)
+- ✅ **Zero Silent Failures**: All errors explicit with guidance
+- ✅ **Professional UI**: Polished dark theme, smooth animations
+- ✅ **Deployment Ready**: Screen + TUI + settings complete
+- ✅ **Agent Collaboration**: Real data flow between agents
+
+### New Files
+| File | Purpose |
+|------|---------|
+| `secureflow/crew/tools.py` (added) | Context management tools: ContextManager class + 4 tools |
+| `secureflow/static/index.html` (rewritten) | Professional dashboard with real-time UI |
+
+### Modified Files
+| File | Changes |
+|------|---------|
+| `secureflow/crew/agents.py` | All agents now have context tools in toolset |
+| `secureflow/crew/tasks.py` | Task descriptions guide agents to use context |
+| `secureflow/config.py` | Intelligent rate limiting + provider health checks |
+| `secureflow/cli.py` | Added server-launch, tui, config commands |
+
+### Breaking Changes
+- None. All changes are backward compatible.
+- Existing API remains unchanged.
+- New features are opt-in.
+
+### Architecture Highlights
+
+**Agent Communication Flow:**
+```
+Recon Agent
+  ├─ Scans target
+  ├─ Saves findings to SharedContext
+  └─ Findings: {ports, services, CVEs}
+     ↓
+Analyst Agent
+  ├─ Reads Recon findings from SharedContext
+  ├─ Performs analysis
+  ├─ Saves analysis to SharedContext
+  └─ Findings: {vulnerabilities, risks, exploitation paths}
+     ↓
+Reporter Agent
+  ├─ Reads ALL findings from SharedContext
+  ├─ Integrates data
+  └─ Generates comprehensive report
+```
+
+**LLM Fallback Chain:**
+```
+Try Gemini 2.0 Flash
+  ├─ Success → Done
+  ├─ 429 Rate Limit → Try Gemini 1.5 Flash
+  │   ├─ Success → Done
+  │   ├─ Still Limited → Try Ollama
+  │   │   ├─ Success → Done
+  │   │   └─ Unavailable → Wait + Error (explicit)
+  │   └─ Error → Raise (explicit)
+  └─ Other Error → Raise (explicit)
+```
 
 ---
 

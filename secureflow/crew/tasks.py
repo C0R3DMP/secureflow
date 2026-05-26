@@ -13,14 +13,18 @@ def create_security_tasks(target: str, agents: dict = None):
         1. Execute nmap scan to identify open ports and running services
         2. Look up known CVEs for each discovered service
         3. Document initial attack surface and service versions
+        4. **IMPORTANT: Save all findings to shared context using 'Save Findings to Context' tool** with key="scan_results"
 
         Provide structured output with:
         - Open ports and services
         - Service versions detected
         - Known vulnerabilities per service
         - Quick risk assessment (low/medium/high)
+
+        You have access to 'Save Findings to Context' and 'Get Latest Findings from All Agents' tools.
+        Save your reconnaissance findings so the Analyst can read them in the next phase.
         """,
-        expected_output="Detailed reconnaissance report with ports, services, and CVE findings",
+        expected_output="Detailed reconnaissance report with ports, services, and CVE findings. Findings saved to shared context.",
         agent=agents["recon"],
     )
 
@@ -28,11 +32,16 @@ def create_security_tasks(target: str, agents: dict = None):
         description=f"""
         Perform deep vulnerability analysis on {target} based on reconnaissance findings.
 
-        1. Analyze each discovered service for exploitability
-        2. Correlate CVEs and identify common exploitation chains
-        3. Assess business impact and risk severity (CVSS-based)
-        4. Identify services that could lead to lateral movement
-        5. Prioritize vulnerabilities by severity and exploitability
+        **CRITICAL: First, read the Recon findings from shared context using 'Read Context Findings' tool**
+        - Use: read_context_findings(agent_name="recon", key="scan_results")
+
+        1. Read recon findings from shared context
+        2. Analyze each discovered service for exploitability
+        3. Correlate CVEs and identify common exploitation chains
+        4. Assess business impact and risk severity (CVSS-based)
+        5. Identify services that could lead to lateral movement
+        6. Prioritize vulnerabilities by severity and exploitability
+        7. **Save all analysis findings to shared context** with key="vulnerability_analysis"
 
         Provide structured analysis with:
         - Top 5 critical vulnerabilities
@@ -40,8 +49,10 @@ def create_security_tasks(target: str, agents: dict = None):
         - Potential impact (data theft, RCE, DoS, etc.)
         - Lateral movement risks
         - Exposure severity (internal vs internet-facing)
+
+        You have tools: 'Read Context Findings', 'Get All Agent Findings', 'Save Findings to Context'
         """,
-        expected_output="Risk assessment and vulnerability prioritization analysis",
+        expected_output="Risk assessment and vulnerability prioritization analysis. Analysis saved to shared context.",
         agent=agents["analyst"],
         context=[recon_task],
     )
@@ -50,20 +61,29 @@ def create_security_tasks(target: str, agents: dict = None):
         description=f"""
         Create an executive-ready security assessment report for {target}.
 
-        Based on reconnaissance and analysis findings:
+        **CRITICAL: First, read ALL previous agent findings from shared context**
+        - Use: read_context_findings(agent_name="recon", key="scan_results")
+        - Use: read_context_findings(agent_name="analyst", key="vulnerability_analysis")
+        - Or use: get_all_findings(agent_name="recon") or get_all_findings(agent_name="analyst")
 
-        1. Write executive summary (1 page, non-technical)
-        2. Create detailed findings section with CVSS scores
-        3. Develop remediation roadmap with:
+        Based on reconnaissance and analysis findings from shared context:
+
+        1. Read all findings from Recon and Analyst from shared context
+        2. Write executive summary (1 page, non-technical)
+        3. Create detailed findings section with CVSS scores
+        4. Develop remediation roadmap with:
            - Immediate actions (critical vulnerabilities)
            - 30-day remediation plan
            - 90-day hardening plan
-        4. Include risk metrics and KPIs
-        5. Suggest security controls to implement
+        5. Include risk metrics and KPIs
+        6. Suggest security controls to implement
+        7. Save final report to shared context
 
         Format as professional HTML report suitable for board review.
+
+        You have tools: 'Read Context Findings', 'Get All Agent Findings', 'Get Latest Findings from All Agents', 'Save Findings to Context'
         """,
-        expected_output="Professional HTML security report with executive summary and remediation roadmap",
+        expected_output="Professional HTML security report with executive summary and remediation roadmap. Report saved to shared context.",
         agent=agents["reporter"],
         context=[recon_task, analysis_task],
     )

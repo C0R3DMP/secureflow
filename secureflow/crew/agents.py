@@ -1,5 +1,9 @@
 from crewai import Agent, LLM
-from secureflow.crew.tools import run_nmap_scan, lookup_cves, assess_service
+from secureflow.crew.tools import (
+    run_nmap_scan, lookup_cves, assess_service,
+    save_findings_to_context, read_context_findings,
+    get_all_findings, get_latest_findings
+)
 from secureflow.config import get_llm_with_rate_limit_fallback
 import os
 
@@ -36,13 +40,13 @@ class CrewAgents:
         """Fast reconnaissance agent using Gemini."""
         return Agent(
             role="Security Reconnaissance Specialist",
-            goal="Discover network topology, open ports, running services, and preliminary vulnerability surface",
+            goal="Discover network topology, open ports, running services, and preliminary vulnerability surface. Save findings to shared context.",
             backstory=(
                 "Expert in network mapping and service enumeration. Uses aggressive but safe "
                 "scanning techniques to build complete target profiles. Fast thinker who prioritizes "
-                "speed and breadth over depth."
+                "speed and breadth over depth. Always saves findings to shared context so other agents can learn."
             ),
-            tools=[run_nmap_scan, lookup_cves],
+            tools=[run_nmap_scan, lookup_cves, save_findings_to_context, get_latest_findings],
             verbose=True,
             max_iter=5,
             allow_delegation=False,
@@ -54,13 +58,13 @@ class CrewAgents:
         """Deep analysis agent using Claude."""
         return Agent(
             role="Vulnerability Analysis Expert",
-            goal="Analyze discovered vulnerabilities, correlate CVEs, assess risk, and identify exploitation paths",
+            goal="Read recon findings from shared context. Analyze discovered vulnerabilities, correlate CVEs, assess risk, and identify exploitation paths. Save analysis to context.",
             backstory=(
                 "Senior security researcher with 15+ years of experience. Known for deep technical "
                 "analysis and connecting disparate findings into coherent threat narratives. Methodical "
-                "and thorough, never misses critical details."
+                "and thorough, never misses critical details. Always reads previous agent findings from shared context before analyzing."
             ),
-            tools=[assess_service, lookup_cves],
+            tools=[assess_service, lookup_cves, read_context_findings, save_findings_to_context, get_all_findings],
             verbose=True,
             max_iter=7,
             allow_delegation=False,
@@ -72,13 +76,13 @@ class CrewAgents:
         """Reporting agent using Ollama for documentation."""
         return Agent(
             role="Security Report Specialist",
-            goal="Create comprehensive, executive-friendly security reports with clear remediation roadmaps",
+            goal="Read all recon and analysis findings from shared context. Create comprehensive, executive-friendly security reports with clear remediation roadmaps",
             backstory=(
                 "Former CISO who bridges the gap between technical security and business needs. "
                 "Excels at translating complex findings into actionable, prioritized remediation "
-                "strategies that stakeholders understand and support."
+                "strategies that stakeholders understand and support. Always reads all previous agent findings from shared context."
             ),
-            tools=[],
+            tools=[read_context_findings, get_all_findings, get_latest_findings, save_findings_to_context],
             verbose=True,
             max_iter=4,
             allow_delegation=False,
@@ -95,13 +99,13 @@ class DevAgents:
 
         return Agent(
             role="Software Architect",
-            goal="Design robust system architecture, choose optimal technology stack, and plan scalable project structure",
+            goal="Design robust system architecture, choose optimal technology stack, and plan scalable project structure. Save design to shared context for developers.",
             backstory=(
                 "Principal architect with 20+ years of experience designing large-scale systems. "
                 "Expert in pattern recognition, technology evaluation, and translating requirements "
-                "into elegant architectural designs that teams can build upon."
+                "into elegant architectural designs that teams can build upon. Always saves architectural decisions to shared context."
             ),
-            tools=[design_system, recommend_stack, plan_structure],
+            tools=[design_system, recommend_stack, plan_structure, save_findings_to_context, get_latest_findings],
             verbose=True,
             max_iter=6,
             allow_delegation=False,
@@ -115,13 +119,13 @@ class DevAgents:
 
         return Agent(
             role="Senior Software Developer",
-            goal="Write production-quality code, implement features, and create well-structured project files",
+            goal="Read architecture from shared context. Write production-quality code, implement features, and create well-structured project files. Save code to context.",
             backstory=(
                 "Fullstack developer with 15+ years of experience building scalable applications. "
                 "Known for writing clean, maintainable code, strong testing practices, and mentoring "
-                "junior developers. Stays current with best practices and modern frameworks."
+                "junior developers. Stays current with best practices and modern frameworks. Always reads architect's design before coding."
             ),
-            tools=[write_code, create_file, test_code],
+            tools=[write_code, create_file, test_code, read_context_findings, save_findings_to_context, get_all_findings],
             verbose=True,
             max_iter=8,
             allow_delegation=False,
@@ -135,13 +139,13 @@ class DevAgents:
 
         return Agent(
             role="Code Quality Reviewer",
-            goal="Review code for quality, identify bugs, and suggest improvements for maintainability",
+            goal="Read architecture and code from shared context. Review code for quality, identify bugs, and suggest improvements for maintainability.",
             backstory=(
                 "Senior engineer and code review expert with deep knowledge of software design principles. "
                 "Excels at identifying subtle bugs, security issues, and architectural problems. "
-                "Provides constructive feedback that improves team quality and developer growth."
+                "Provides constructive feedback that improves team quality and developer growth. Always reads previous agent work from shared context."
             ),
-            tools=[review_code, suggest_improvements, find_bugs],
+            tools=[review_code, suggest_improvements, find_bugs, read_context_findings, get_all_findings, get_latest_findings],
             verbose=True,
             max_iter=5,
             allow_delegation=False,

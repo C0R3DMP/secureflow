@@ -453,3 +453,114 @@ def find_bugs(code: str, language: str) -> str:
     """Find potential bugs and issues in code."""
     result = dev_tools.find_bugs_impl(code, language)
     return json.dumps(result, indent=2)
+
+
+class ContextManager:
+    """Manage shared context for inter-agent communication."""
+
+    _context = None
+
+    @classmethod
+    def get_context(cls):
+        """Get or initialize the shared context."""
+        if cls._context is None:
+            from secureflow.crew.memory import SharedContext
+            cls._context = SharedContext()
+        return cls._context
+
+    @staticmethod
+    def save_findings(agent_name: str, key: str, findings: Any) -> Dict[str, Any]:
+        """Save findings to shared context."""
+        try:
+            ctx = ContextManager.get_context()
+            ctx.write(agent_name, key, findings)
+            return {
+                "status": "success",
+                "agent": agent_name,
+                "key": key,
+                "message": f"Findings saved by {agent_name}"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+    @staticmethod
+    def read_findings(agent_name: str, key: str) -> Dict[str, Any]:
+        """Read findings from shared context."""
+        try:
+            ctx = ContextManager.get_context()
+            findings = ctx.read(agent_name, key)
+            return {
+                "status": "success",
+                "agent": agent_name,
+                "key": key,
+                "findings": findings
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+    @staticmethod
+    def get_all_findings(agent_name: str) -> Dict[str, Any]:
+        """Get all findings from a specific agent."""
+        try:
+            ctx = ContextManager.get_context()
+            findings = ctx.get_all(agent_name)
+            return {
+                "status": "success",
+                "agent": agent_name,
+                "findings": findings
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+    @staticmethod
+    def get_latest_findings_all() -> Dict[str, Any]:
+        """Get latest findings from all agents."""
+        try:
+            ctx = ContextManager.get_context()
+            findings = ctx.get_latest_findings()
+            return {
+                "status": "success",
+                "all_findings": findings
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+
+@tool("Save Findings to Context")
+def save_findings_to_context(agent_name: str, key: str, findings: str) -> str:
+    """Save agent findings to shared context for other agents to read."""
+    result = ContextManager.save_findings(agent_name, key, findings)
+    return json.dumps(result, indent=2)
+
+
+@tool("Read Context Findings")
+def read_context_findings(agent_name: str, key: str) -> str:
+    """Read findings from shared context saved by another agent."""
+    result = ContextManager.read_findings(agent_name, key)
+    return json.dumps(result, indent=2)
+
+
+@tool("Get All Agent Findings")
+def get_all_findings(agent_name: str) -> str:
+    """Get all findings saved by a specific agent."""
+    result = ContextManager.get_all_findings(agent_name)
+    return json.dumps(result, indent=2)
+
+
+@tool("Get Latest Findings from All Agents")
+def get_latest_findings() -> str:
+    """Get latest findings from all agents in the crew."""
+    result = ContextManager.get_latest_findings_all()
+    return json.dumps(result, indent=2)

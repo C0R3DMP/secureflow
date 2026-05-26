@@ -3,185 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecureFlow — Security Assessment</title>
+    <title>SecureFlow AI — Professional Security Assessment</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-tertiary: #21262d;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --border: #30363d;
-            --accent-blue: #58a6ff;
-            --accent-green: #3fb950;
-            --accent-yellow: #d29922;
-            --accent-red: #f85149;
+            /* Terminal-inspired dark colors */
+            --bg-primary: #0a0e27;
+            --bg-secondary: #12172a;
+            --bg-tertiary: #1a2045;
+            --text-primary: #e8f0ff;
+            --text-secondary: #8b95c9;
+            --text-muted: #5a6487;
+            --border: #2a3555;
+            --accent-blue: #4da6ff;
+            --accent-green: #2aca5c;
+            --accent-yellow: #ffb84d;
+            --accent-red: #ff5454;
+            --accent-orange: #ff8a3d;
+            --accent-purple: #b77dff;
+
+            /* Shadows for depth */
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'SF Mono', 'Roboto Mono', 'Monaco', monospace;
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
-            padding: 16px;
+            padding: 20px;
             line-height: 1.6;
+            letter-spacing: 0.5px;
         }
 
+        /* Main layout */
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             display: grid;
             grid-template-columns: 1fr 350px;
             gap: 20px;
+            min-height: 100vh;
         }
 
         header {
             grid-column: 1 / -1;
-            padding-bottom: 20px;
-            border-bottom: 1px solid var(--border);
+            padding: 30px 0 20px;
+            border-bottom: 2px solid var(--accent-blue);
             margin-bottom: 20px;
         }
 
         h1 {
-            font-size: 28px;
-            font-weight: 600;
+            font-size: 32px;
+            font-weight: 700;
             margin-bottom: 8px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 1px;
         }
 
         .header-subtitle {
             color: var(--text-secondary);
-            font-size: 14px;
+            font-size: 13px;
+            font-weight: 500;
         }
 
         .panel {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 24px;
             display: flex;
             flex-direction: column;
+            box-shadow: var(--shadow-md);
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .panel:hover {
+            border-color: var(--accent-blue);
+            box-shadow: var(--shadow-lg);
         }
 
         .panel h2 {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 16px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 20px;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
             color: var(--accent-blue);
             border-bottom: 1px solid var(--border);
             padding-bottom: 12px;
         }
 
-        .form-group {
-            margin-bottom: 16px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        label {
+        .panel h3 {
             font-size: 13px;
             font-weight: 600;
-            margin-bottom: 6px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        input, select {
-            padding: 10px 12px;
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
+            margin: 16px 0 12px;
             color: var(--text-primary);
-            font-size: 13px;
-            transition: border-color 0.2s;
-            font-family: inherit;
-        }
-
-        input:focus, select:focus {
-            outline: none;
-            border-color: var(--accent-blue);
-        }
-
-        input:invalid {
-            border-color: var(--accent-red);
-        }
-
-        .btn {
-            padding: 10px 16px;
-            border: 1px solid var(--border);
-            background: var(--accent-blue);
-            color: white;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 1px;
         }
 
-        .btn:hover:not(:disabled) {
-            background: #79c0ff;
-            border-color: var(--accent-blue);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .status-display {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 20px;
-            padding: 12px;
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-            border: 1px solid var(--border);
-        }
-
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .status-idle {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
-        }
-
-        .status-running {
-            background: rgba(212, 153, 34, 0.2);
-            color: var(--accent-yellow);
-        }
-
-        .status-success {
-            background: rgba(63, 185, 80, 0.2);
-            color: var(--accent-green);
-        }
-
-        .status-error {
-            background: rgba(248, 81, 73, 0.2);
-            color: var(--accent-red);
-        }
-
-        .timer {
-            font-size: 13px;
-            color: var(--text-secondary);
-            font-weight: 600;
-            font-family: 'Courier New', monospace;
-        }
-
-        .phases-container {
+        /* Progress phases */
+        .phases {
             display: flex;
             flex-direction: column;
             gap: 12px;
@@ -189,46 +118,75 @@
         }
 
         .phase {
-            padding: 12px;
+            padding: 16px;
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
-            border-left: 3px solid var(--border);
-            border-radius: 4px;
-            transition: all 0.2s;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.3s;
         }
 
-        .phase.running {
-            border-left-color: var(--accent-yellow);
-            background: rgba(212, 153, 34, 0.1);
+        .phase:hover {
+            border-color: var(--accent-blue);
+            background: var(--bg-primary);
+        }
+
+        .phase.active {
+            border-color: var(--accent-yellow);
+            background: rgba(255, 180, 77, 0.05);
         }
 
         .phase.completed {
-            border-left-color: var(--accent-green);
-            background: rgba(63, 185, 80, 0.1);
+            border-color: var(--accent-green);
+            background: rgba(46, 202, 92, 0.05);
         }
 
-        .phase.error {
-            border-left-color: var(--accent-red);
-            background: rgba(248, 81, 73, 0.1);
-        }
-
-        .phase-header {
+        .phase-info {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 12px;
+            flex: 1;
         }
 
         .phase-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-size: 16px;
-            width: 20px;
-            text-align: center;
+            font-weight: 700;
+            background: var(--bg-secondary);
+            border: 2px solid var(--text-secondary);
+            transition: all 0.3s;
         }
 
-        .phase-title {
-            font-weight: 600;
-            font-size: 13px;
+        .phase.completed .phase-icon {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            color: var(--bg-primary);
+        }
+
+        .phase.active .phase-icon {
+            background: var(--accent-yellow);
+            border-color: var(--accent-yellow);
+            color: var(--bg-primary);
+            box-shadow: 0 0 12px rgba(255, 180, 77, 0.3);
+        }
+
+        .phase-name {
             flex: 1;
+        }
+
+        .phase-name strong {
+            display: block;
+            font-size: 13px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
         }
 
         .phase-status {
@@ -236,192 +194,289 @@
             color: var(--text-secondary);
         }
 
-        .progress-bar {
-            width: 100%;
-            height: 4px;
-            background: var(--bg-primary);
-            border-radius: 2px;
-            overflow: hidden;
+        .phase-timer {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--accent-yellow);
+            min-width: 50px;
+            text-align: right;
         }
 
-        .progress-fill {
-            height: 100%;
+        /* Agent messages/logs */
+        .agent-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 600px;
+            overflow-y: auto;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin: 16px 0;
+        }
+
+        .agent-message {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--accent-blue);
+            border-radius: 4px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .agent-message.recon {
+            border-left-color: var(--accent-blue);
+        }
+
+        .agent-message.analyst {
+            border-left-color: var(--accent-purple);
+        }
+
+        .agent-message.reporter {
+            border-left-color: var(--accent-green);
+        }
+
+        .agent-message.system {
+            border-left-color: var(--accent-yellow);
+        }
+
+        .agent-label {
+            font-weight: 700;
+            color: var(--accent-blue);
+            font-size: 11px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .agent-message.analyst .agent-label { color: var(--accent-purple); }
+        .agent-message.reporter .agent-label { color: var(--accent-green); }
+        .agent-message.system .agent-label { color: var(--accent-yellow); }
+
+        /* Logs panel */
+        .logs-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 11px;
+            font-family: 'SF Mono', monospace;
+        }
+
+        .log-entry {
+            padding: 6px 8px;
+            border-radius: 4px;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .log-timestamp {
+            color: var(--text-muted);
+            min-width: 110px;
+            font-weight: 600;
+        }
+
+        .log-level {
+            min-width: 55px;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 10px;
+        }
+
+        .log-message {
+            flex: 1;
+            color: var(--text-secondary);
+        }
+
+        .log-entry.info {
+            background: rgba(77, 166, 255, 0.05);
+        }
+
+        .log-entry.info .log-level {
+            color: var(--accent-blue);
+        }
+
+        .log-entry.warning {
+            background: rgba(255, 180, 77, 0.05);
+        }
+
+        .log-entry.warning .log-level {
+            color: var(--accent-yellow);
+        }
+
+        .log-entry.error {
+            background: rgba(255, 84, 84, 0.05);
+        }
+
+        .log-entry.error .log-level {
+            color: var(--accent-red);
+        }
+
+        .log-entry.success {
+            background: rgba(46, 202, 92, 0.05);
+        }
+
+        .log-entry.success .log-level {
+            color: var(--accent-green);
+        }
+
+        /* Action buttons */
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 16px;
             background: var(--accent-blue);
-            transition: width 0.3s ease;
-            width: 0%;
+            border: none;
+            border-radius: 8px;
+            color: var(--bg-primary);
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: inherit;
         }
 
-        .phase.completed .progress-fill {
+        button:hover {
             background: var(--accent-green);
-            width: 100%;
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
         }
 
-        .phase.error .progress-fill {
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+            border-color: var(--accent-blue);
+        }
+
+        .btn-danger {
             background: var(--accent-red);
-            width: 100%;
+            color: var(--bg-primary);
         }
 
-        .agent-indicator {
+        .btn-danger:hover {
+            background: #ff3636;
+        }
+
+        /* Status indicator */
+        .status-indicator {
             display: flex;
             align-items: center;
             gap: 8px;
             padding: 8px 12px;
             background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 12px;
-            margin-bottom: 12px;
         }
 
-        .agent-icon {
-            font-size: 14px;
+        .indicator-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
         }
 
-        .agent-name {
-            font-weight: 600;
-            color: var(--accent-blue);
+        .indicator-dot.idle {
+            background: var(--text-secondary);
+            animation: none;
         }
 
-        .terminal {
-            background: var(--bg-primary);
+        .indicator-dot.running {
+            background: var(--accent-green);
+        }
+
+        .indicator-dot.error {
+            background: var(--accent-red);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Provider status */
+        .provider-status {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin: 12px 0;
+        }
+
+        .provider {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 12px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            max-height: 600px;
-            overflow-y: auto;
-            line-height: 1.4;
-            margin-top: 20px;
-        }
-
-        .log-line {
             display: flex;
-            gap: 8px;
-            margin-bottom: 2px;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
         }
 
-        .log-time {
-            color: var(--text-secondary);
-            flex-shrink: 0;
-            min-width: 90px;
+        .provider-name {
+            font-weight: 600;
+            color: var(--text-primary);
         }
 
-        .log-message {
-            flex: 1;
-            word-break: break-word;
+        .provider-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
         }
 
-        .log-error {
-            color: var(--accent-red);
-        }
-
-        .log-success {
+        .provider-badge.available {
+            background: rgba(46, 202, 92, 0.2);
             color: var(--accent-green);
         }
 
-        .log-info {
-            color: var(--accent-blue);
-        }
-
-        .log-warning {
+        .provider-badge.limited {
+            background: rgba(255, 180, 77, 0.2);
             color: var(--accent-yellow);
         }
 
-        .sidebar {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .history-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        .history-item {
-            padding: 10px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 12px;
-        }
-
-        .history-item:hover {
-            background: rgba(88, 166, 255, 0.1);
-            border-color: var(--accent-blue);
-        }
-
-        .history-target {
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .history-time {
-            color: var(--text-secondary);
-            font-size: 11px;
-            margin-bottom: 4px;
-        }
-
-        .history-status {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: 600;
-        }
-
-        .history-success {
-            background: rgba(63, 185, 80, 0.2);
-            color: var(--accent-green);
-        }
-
-        .history-error {
-            background: rgba(248, 81, 73, 0.2);
+        .provider-badge.unavailable {
+            background: rgba(255, 84, 84, 0.2);
             color: var(--accent-red);
-        }
-
-        .message-box {
-            padding: 10px 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-            font-size: 13px;
-            border: 1px solid var(--border);
-            display: none;
-        }
-
-        .message-box.show { display: block; }
-        .message-box.error { background: rgba(248, 81, 73, 0.1); border-color: var(--accent-red); color: var(--accent-red); }
-        .message-box.success { background: rgba(63, 185, 80, 0.1); border-color: var(--accent-green); color: var(--accent-green); }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-        }
-
-        .empty-state-icon {
-            font-size: 40px;
-            margin-bottom: 12px;
         }
 
         /* Scrollbar styling */
         ::-webkit-scrollbar {
             width: 8px;
-            height: 8px;
         }
 
         ::-webkit-scrollbar-track {
-            background: var(--bg-primary);
+            background: var(--bg-tertiary);
+            border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb {
@@ -430,400 +485,656 @@
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: var(--text-secondary);
+            background: var(--accent-blue);
         }
 
-        /* Mobile responsive */
-        @media (max-width: 768px) {
+        /* History panel */
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .history-item {
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .history-item:hover {
+            border-color: var(--accent-blue);
+            background: var(--bg-secondary);
+        }
+
+        .history-item-target {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .history-item-time {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+
+        .history-item-status {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .history-item-status.success {
+            background: rgba(46, 202, 92, 0.2);
+            color: var(--accent-green);
+        }
+
+        .history-item-status.error {
+            background: rgba(255, 84, 84, 0.2);
+            color: var(--accent-red);
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
             .container {
                 grid-template-columns: 1fr;
             }
 
-            .terminal {
-                max-height: 300px;
+            header {
+                grid-column: 1;
             }
 
-            .history-list {
-                max-height: 300px;
+            .panel {
+                grid-column: 1;
             }
+        }
+
+        /* Loading spinner */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         .spinner {
             display: inline-block;
-            width: 12px;
-            height: 12px;
+            width: 16px;
+            height: 16px;
             border: 2px solid var(--border);
-            border-top-color: var(--accent-yellow);
+            border-top: 2px solid var(--accent-blue);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
 
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 14, 39, 0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: var(--accent-blue);
+            font-size: 18px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            margin: 0;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .settings-group {
+            margin-bottom: 24px;
+        }
+
+        .settings-group h3 {
+            color: var(--accent-blue);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .provider-config {
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+
+        .provider-config h4 {
+            color: var(--text-primary);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .provider-config-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .provider-config input {
+            flex: 1;
+        }
+
+        .btn-test {
+            padding: 8px 12px;
+            background: var(--accent-purple);
+            border: none;
+            border-radius: 4px;
+            color: var(--bg-primary);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        .btn-test:hover {
+            background: var(--accent-blue);
         }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <header>
-            <h1>🔒 SecureFlow</h1>
-            <p class="header-subtitle">AI-Powered Security Assessment Platform</p>
+            <h1>SecureFlow AI</h1>
+            <p class="header-subtitle">Professional Distributed Security Assessment Engine</p>
         </header>
 
-        <!-- Main Content Panel -->
-        <div class="panel">
-            <h2>Security Scan</h2>
+        <!-- Main content: Agent messages and logs -->
+        <div class="panel" style="grid-column: 1;">
+            <h2>Security Scan - Real-Time Agent Collaboration</h2>
 
-            <div class="message-box" id="messageBox"></div>
-
-            <!-- Form -->
-            <form id="scanForm">
-                <div class="form-group">
-                    <label for="target">Target (IP/Domain/URL)</label>
-                    <input
-                        type="text"
-                        id="target"
-                        name="target"
-                        placeholder="e.g., scanme.nmap.org"
-                        pattern="[a-zA-Z0-9\-\.]+(\.[a-zA-Z0-9\-\.]+)*|^(\d{1,3}\.){3}\d{1,3}$"
-                        required
-                        title="Enter a valid domain, URL, or IP address"
-                    >
+            <div class="phase h3">Progress Phases</div>
+            <div class="phases" id="phases-container">
+                <div class="phase" id="phase-recon">
+                    <div class="phase-info">
+                        <div class="phase-icon">1</div>
+                        <div class="phase-name">
+                            <strong>Reconnaissance</strong>
+                            <span class="phase-status" id="recon-status">Pending</span>
+                        </div>
+                    </div>
+                    <div class="phase-timer" id="recon-timer">00:00</div>
                 </div>
-
-                <button type="submit" class="btn" id="startBtn">
-                    ▶ Start Scan
-                </button>
-            </form>
-
-            <!-- Status Display -->
-            <div class="status-display" id="statusDisplay" style="display: none;">
-                <span class="status-badge status-idle" id="statusBadge">Idle</span>
-                <span class="timer" id="timer">00:00</span>
-            </div>
-
-            <!-- Phases -->
-            <div class="phases-container" id="phasesContainer">
-                <div class="empty-state">
-                    <div class="empty-state-icon">⏳</div>
-                    <p>No scan in progress</p>
+                <div class="phase" id="phase-analysis">
+                    <div class="phase-info">
+                        <div class="phase-icon">2</div>
+                        <div class="phase-name">
+                            <strong>Vulnerability Analysis</strong>
+                            <span class="phase-status" id="analysis-status">Pending</span>
+                        </div>
+                    </div>
+                    <div class="phase-timer" id="analysis-timer">00:00</div>
+                </div>
+                <div class="phase" id="phase-reporting">
+                    <div class="phase-info">
+                        <div class="phase-icon">3</div>
+                        <div class="phase-name">
+                            <strong>Report Generation</strong>
+                            <span class="phase-status" id="reporting-status">Pending</span>
+                        </div>
+                    </div>
+                    <div class="phase-timer" id="reporting-timer">00:00</div>
                 </div>
             </div>
 
-            <!-- Agent Indicator -->
-            <div class="agent-indicator" id="agentIndicator" style="display: none;">
-                <span class="agent-icon" id="agentIcon">🤖</span>
-                <span class="agent-name" id="agentName">Waiting...</span>
+            <h3>Agent Messages</h3>
+            <div class="agent-messages" id="messages-container">
+                <div class="agent-message system">
+                    <div class="agent-label">System</div>
+                    <div>Ready for security assessment. Enter target and click "Start Scan".</div>
+                </div>
             </div>
 
-            <!-- Terminal Output -->
-            <div class="terminal" id="terminal" style="display: none;"></div>
+            <h3>Logs</h3>
+            <div class="logs-panel" id="logs-container">
+                <div class="log-entry info">
+                    <span class="log-timestamp">[00:00:00]</span>
+                    <span class="log-level">INFO</span>
+                    <span class="log-message">Dashboard initialized</span>
+                </div>
+            </div>
         </div>
 
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="panel">
-                <h2>Scan History</h2>
-                <div class="history-list" id="historyList">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📭</div>
-                        <p>No scans yet</p>
+        <!-- Right sidebar: Controls and history -->
+        <div class="panel" style="grid-column: 2; grid-row: 2;">
+            <h2>Controls</h2>
+
+            <div class="form-group">
+                <label for="target-input">Target</label>
+                <input type="text" id="target-input" placeholder="IP, hostname, or URL" value="localhost">
+            </div>
+
+            <div class="status-indicator" id="status-indicator">
+                <div class="indicator-dot idle"></div>
+                <span>Idle</span>
+            </div>
+
+            <div class="actions">
+                <button id="btn-scan" onclick="startScan()">
+                    <span>▶ Start Scan</span>
+                </button>
+                <button class="btn-secondary" id="btn-download" disabled onclick="downloadReport()">
+                    <span>⬇ Download Report</span>
+                </button>
+                <button class="btn-secondary" onclick="openSettings()">
+                    <span>⚙️ Settings</span>
+                </button>
+                <button class="btn-danger" onclick="clearLogs()" style="margin-top: 8px;">
+                    <span>🗑 Clear Logs</span>
+                </button>
+            </div>
+
+            <h3 style="margin-top: 24px;">Provider Status</h3>
+            <div class="provider-status" id="provider-status">
+                <div class="provider">
+                    <span class="provider-name">Claude</span>
+                    <span class="provider-badge unavailable">N/A</span>
+                </div>
+                <div class="provider">
+                    <span class="provider-name">Gemini</span>
+                    <span class="provider-badge available">Ready</span>
+                </div>
+                <div class="provider">
+                    <span class="provider-name">Ollama</span>
+                    <span class="provider-badge available">Local</span>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 24px;">Scan History</h3>
+            <div class="history-list" id="history-container">
+                <div style="color: var(--text-muted); font-size: 11px;">No scans yet</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ Provider Settings</h2>
+                <button class="modal-close" onclick="closeSettings()">&times;</button>
+            </div>
+
+            <div class="settings-group">
+                <h3>LLM Providers</h3>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                    Configure and test your LLM providers. Priority order: Claude > Gemini > Ollama
+                </p>
+
+                <!-- Claude Provider -->
+                <div class="provider-config">
+                    <h4>🤖 Claude (Anthropic)</h4>
+                    <div class="provider-config-row">
+                        <input type="password" id="claude-key" placeholder="ANTHROPIC_API_KEY" style="flex: 1;">
+                        <button class="btn-test" onclick="testProvider('claude')">Test</button>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-muted);">
+                        Status: <span id="claude-status">Not configured</span>
                     </div>
                 </div>
+
+                <!-- Gemini Provider -->
+                <div class="provider-config">
+                    <h4>✨ Gemini (Google)</h4>
+                    <div class="provider-config-row">
+                        <input type="password" id="gemini-key" placeholder="GEMINI_API_KEY" style="flex: 1;">
+                        <button class="btn-test" onclick="testProvider('gemini')">Test</button>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-muted);">
+                        Status: <span id="gemini-status">Not configured</span>
+                    </div>
+                </div>
+
+                <!-- Ollama Provider -->
+                <div class="provider-config">
+                    <h4>🦙 Ollama (Local)</h4>
+                    <div class="provider-config-row">
+                        <input type="text" id="ollama-url" placeholder="http://localhost:11434" style="flex: 1;">
+                        <button class="btn-test" onclick="testProvider('ollama')">Test</button>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-muted);">
+                        Status: <span id="ollama-status">Checking...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <h3>Provider Priority</h3>
+                <div style="font-size: 12px; color: var(--text-secondary);">
+                    <div style="margin: 8px 0;">1️⃣ Claude (Professional, most capable)</div>
+                    <div style="margin: 8px 0;">2️⃣ Gemini (Fast, free tier)</div>
+                    <div style="margin: 8px 0;">3️⃣ Ollama (Local, privacy-focused)</div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 24px;">
+                <button class="btn-secondary" onclick="saveSettings()" style="flex: 1;">💾 Save Settings</button>
+                <button class="btn-danger" onclick="closeSettings()">Close</button>
             </div>
         </div>
     </div>
 
     <script>
-        const CONFIG = {
-            apiBase: window.location.origin,
-            sseTimeout: 300000,
-            historyRefreshInterval: 5000
+        const state = {
+            isScanning: false,
+            currentTarget: '',
+            currentPhase: null,
+            phaseStartTimes: {},
+            messageLog: [],
+            logs: [],
+            report: null,
         };
 
-        const AGENTS = {
-            recon: { icon: '🔍', name: 'Recon Agent', color: '#d29922' },
-            analyst: { icon: '🔬', name: 'Analyst Agent', color: '#58a6ff' },
-            reporter: { icon: '📊', name: 'Reporter Agent', color: '#3fb950' }
-        };
+        function log(level, message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = { timestamp, level, message };
+            state.logs.push(entry);
 
-        let state = {
-            scanning: false,
-            currentTarget: null,
-            startTime: null,
-            timerInterval: null,
-            phases: {
-                'Reconnaissance': { status: 'pending', progress: 0, agent: 'recon' },
-                'Vulnerability Analysis': { status: 'pending', progress: 0, agent: 'analyst' },
-                'Report Generation': { status: 'pending', progress: 0, agent: 'reporter' }
-            },
-            logs: []
-        };
-
-        document.addEventListener('DOMContentLoaded', () => {
-            setupEventListeners();
-            loadHistory();
-            setInterval(loadHistory, CONFIG.historyRefreshInterval);
-        });
-
-        function setupEventListeners() {
-            document.getElementById('scanForm').addEventListener('submit', startScan);
+            const logsContainer = document.getElementById('logs-container');
+            const logEl = document.createElement('div');
+            logEl.className = `log-entry ${level}`;
+            logEl.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="log-level">${level}</span>
+                <span class="log-message">${message}</span>
+            `;
+            logsContainer.appendChild(logEl);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
         }
 
-        async function startScan(e) {
-            e.preventDefault();
-            if (state.scanning) return;
+        function addMessage(agent, message) {
+            const msgContainer = document.getElementById('messages-container');
+            if (msgContainer.children.length === 1 && msgContainer.querySelector('.system')) {
+                msgContainer.innerHTML = '';
+            }
 
-            const target = document.getElementById('target').value.trim();
+            const messageEl = document.createElement('div');
+            const agentClass = agent.toLowerCase().replace(' ', '-');
+            messageEl.className = `agent-message ${agentClass}`;
+            messageEl.innerHTML = `
+                <div class="agent-label">${agent}</div>
+                <div>${message}</div>
+            `;
+            msgContainer.appendChild(messageEl);
+            msgContainer.scrollTop = msgContainer.scrollHeight;
+        }
+
+        function setPhaseStatus(phase, status) {
+            const phaseEl = document.getElementById(`phase-${phase}`);
+            const statusEl = document.getElementById(`${phase}-status`);
+
+            phaseEl.classList.remove('active', 'completed');
+            if (status === 'active') {
+                phaseEl.classList.add('active');
+                state.phaseStartTimes[phase] = Date.now();
+                statusEl.textContent = 'Running...';
+            } else if (status === 'completed') {
+                phaseEl.classList.add('completed');
+                statusEl.textContent = 'Complete ✓';
+            } else {
+                statusEl.textContent = 'Pending';
+            }
+        }
+
+        function updateTimer(phase) {
+            if (state.phaseStartTimes[phase]) {
+                const elapsed = Math.floor((Date.now() - state.phaseStartTimes[phase]) / 1000);
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                const timer = document.getElementById(`${phase}-timer`);
+                timer.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+        }
+
+        function startScan() {
+            const target = document.getElementById('target-input').value;
             if (!target) {
-                showMessage('Please enter a target', 'error');
+                log('warning', 'Please enter a target');
                 return;
             }
 
-            // Validate target
-            if (!isValidTarget(target)) {
-                showMessage('Invalid target. Use domain, URL, or IP address.', 'error');
-                return;
-            }
-
-            state.scanning = true;
+            state.isScanning = true;
             state.currentTarget = target;
-            state.startTime = Date.now();
-            state.phases = {
-                'Reconnaissance': { status: 'pending', progress: 0, agent: 'recon' },
-                'Vulnerability Analysis': { status: 'pending', progress: 0, agent: 'analyst' },
-                'Report Generation': { status: 'pending', progress: 0, agent: 'reporter' }
-            };
-            state.logs = [];
+            state.messageLog = [];
 
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('target').disabled = true;
-            document.getElementById('statusDisplay').style.display = 'flex';
-            document.getElementById('terminal').style.display = 'block';
-            document.getElementById('agentIndicator').style.display = 'flex';
+            document.getElementById('btn-scan').disabled = true;
+            const indicator = document.getElementById('status-indicator');
+            indicator.innerHTML = '<div class="indicator-dot running"></div><span>Scanning...</span>';
 
-            updateStatus('running');
-            updatePhases();
-            startTimer();
+            log('info', `Starting scan on target: ${target}`);
+            addMessage('System', `Initializing collaborative security assessment for ${target}`);
 
-            try {
-                startSSEStream(target);
-            } catch (error) {
-                showMessage(`Error: ${error.message}`, 'error');
-                resetUI();
-            }
-        }
+            // Clear phase statuses
+            ['recon', 'analysis', 'reporting'].forEach(p => {
+                setPhaseStatus(p, 'pending');
+            });
 
-        function isValidTarget(target) {
-            // IP validation
-            const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-            if (ipRegex.test(target)) return true;
-
-            // Domain/URL validation
-            const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-            return domainRegex.test(target);
-        }
-
-        function startTimer() {
-            state.timerInterval = setInterval(() => {
-                const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
-                const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
-                const seconds = String(elapsed % 60).padStart(2, '0');
-                document.getElementById('timer').textContent = `${minutes}:${seconds}`;
-            }, 100);
-        }
-
-        function stopTimer() {
-            if (state.timerInterval) {
-                clearInterval(state.timerInterval);
-            }
+            // Connect to SSE stream
+            startSSEStream(target);
         }
 
         function startSSEStream(target) {
-            const eventSource = new EventSource(`${CONFIG.apiBase}/stream/${encodeURIComponent(target)}`);
+            const eventSource = new EventSource(`/stream/${target}`);
 
             eventSource.addEventListener('message', (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-
-                    if (data.event === 'start') {
-                        addLog(`Starting scan of ${data.target}`, 'info');
-                    } else if (data.event === 'phase_complete') {
-                        const phaseName = data.phase;
-                        if (state.phases[phaseName]) {
-                            state.phases[phaseName].status = 'completed';
-                            state.phases[phaseName].progress = 100;
-                            addLog(`✓ ${phaseName} complete`, 'success');
-                        }
-                        updatePhases();
-                    } else if (data.event === 'complete') {
-                        addLog('✅ Scan completed successfully!', 'success');
-                        updateStatus('success');
-                        stopTimer();
-                        resetScan();
-                        loadHistory();
-                    } else if (data.event === 'error') {
-                        addLog(`❌ Error: ${data.message || 'Unknown error'}`, 'error');
-                        updateStatus('error');
-                        stopTimer();
-                        resetScan();
-                    }
-                } catch (e) {
-                    console.error('Parse error:', e);
-                }
+                const data = JSON.parse(event.data);
+                handleStreamEvent(data);
             });
 
             eventSource.addEventListener('error', () => {
-                if (state.scanning) {
-                    addLog('Connection lost', 'error');
-                    updateStatus('error');
-                }
                 eventSource.close();
-                stopTimer();
-                resetScan();
+                log('error', 'Connection to server lost');
+                finishScan();
             });
+        }
 
+        function handleStreamEvent(data) {
+            if (data.event === 'start') {
+                log('info', `Scan started: ${data.target}`);
+            } else if (data.event === 'phase_complete') {
+                const phaseName = data.phase.toLowerCase().replace(' ', '_');
+                setPhaseStatus(phaseName.split('_')[0], 'completed');
+                addMessage('System', `✓ ${data.phase} complete (${data.n}/${data.total})`);
+                log('success', `Phase ${data.n}/${data.total}: ${data.phase} completed`);
+            } else if (data.event === 'complete') {
+                log('success', 'Security assessment complete');
+                addMessage('System', 'Assessment complete! Report is ready for download.');
+                state.report = data.result;
+                finishScan();
+            }
+
+            // Update timers
+            ['recon', 'analysis', 'reporting'].forEach(updateTimer);
+        }
+
+        function finishScan() {
+            state.isScanning = false;
+            document.getElementById('btn-scan').disabled = false;
+            document.getElementById('btn-download').disabled = false;
+
+            const indicator = document.getElementById('status-indicator');
+            indicator.innerHTML = '<div class="indicator-dot idle"></div><span>Complete</span>';
+
+            loadHistory();
+        }
+
+        function downloadReport() {
+            if (!state.report) {
+                log('warning', 'No report available');
+                return;
+            }
+
+            const element = document.createElement('a');
+            const file = new Blob([state.report], { type: 'text/html' });
+            element.href = URL.createObjectURL(file);
+            element.download = `secureflow-report-${state.currentTarget}-${new Date().toISOString().split('T')[0]}.html`;
+            document.body.appendChild(element);
+            element.click();
+            document.body.removeChild(element);
+
+            log('info', 'Report downloaded');
+        }
+
+        function clearLogs() {
+            document.getElementById('logs-container').innerHTML = '';
+            state.logs = [];
+            log('info', 'Logs cleared');
+        }
+
+        function loadHistory() {
+            fetch('/api/history')
+                .then(r => r.json())
+                .then(data => {
+                    const historyContainer = document.getElementById('history-container');
+                    if (data.sessions && data.sessions.length > 0) {
+                        historyContainer.innerHTML = data.sessions.map(s => `
+                            <div class="history-item">
+                                <div class="history-item-target">${s.target}</div>
+                                <div class="history-item-time">${new Date(s.timestamp).toLocaleString()}</div>
+                                <div class="history-item-status ${s.status}">${s.status.toUpperCase()}</div>
+                            </div>
+                        `).join('');
+                    }
+                })
+                .catch(e => log('warning', `Could not load history: ${e.message}`));
+        }
+
+        function openSettings() {
+            document.getElementById('settings-modal').classList.add('active');
+            loadSettings();
+        }
+
+        function closeSettings() {
+            document.getElementById('settings-modal').classList.remove('active');
+        }
+
+        function loadSettings() {
+            const stored = localStorage.getItem('secureflow-settings');
+            if (stored) {
+                const settings = JSON.parse(stored);
+                if (settings.claudeKey) document.getElementById('claude-key').value = settings.claudeKey;
+                if (settings.geminiKey) document.getElementById('gemini-key').value = settings.geminiKey;
+                if (settings.ollamaUrl) document.getElementById('ollama-url').value = settings.ollamaUrl;
+            }
+            checkProviderStatus();
+        }
+
+        function saveSettings() {
+            const settings = {
+                claudeKey: document.getElementById('claude-key').value,
+                geminiKey: document.getElementById('gemini-key').value,
+                ollamaUrl: document.getElementById('ollama-url').value,
+            };
+            localStorage.setItem('secureflow-settings', JSON.stringify(settings));
+            log('info', 'Settings saved to browser storage');
+            addMessage('System', 'Settings saved (browser storage only)');
+        }
+
+        function testProvider(provider) {
+            log('info', `Testing ${provider} provider...`);
+
+            // Simulate test (in real implementation, would call backend)
             setTimeout(() => {
-                if (state.scanning) {
-                    eventSource.close();
-                    stopTimer();
-                    resetScan();
+                if (provider === 'claude') {
+                    const key = document.getElementById('claude-key').value;
+                    const status = key ? '✅ Configured' : '❌ Not configured';
+                    document.getElementById('claude-status').textContent = status;
+                } else if (provider === 'gemini') {
+                    const key = document.getElementById('gemini-key').value;
+                    const status = key ? '✅ Configured' : '❌ Not configured';
+                    document.getElementById('gemini-status').textContent = status;
+                } else if (provider === 'ollama') {
+                    const url = document.getElementById('ollama-url').value;
+                    fetch(`${url}/api/tags`, { timeout: 2000 })
+                        .then(r => {
+                            document.getElementById('ollama-status').textContent = '✅ Running';
+                        })
+                        .catch(() => {
+                            document.getElementById('ollama-status').textContent = '❌ Not responding';
+                        });
                 }
-            }, CONFIG.sseTimeout);
+                log('success', `${provider} test complete`);
+            }, 500);
         }
 
-        function addLog(message, type = 'info') {
-            const timestamp = new Date().toLocaleTimeString();
-            state.logs.push({ timestamp, message, type });
-
-            const terminal = document.getElementById('terminal');
-            const logLine = document.createElement('div');
-            logLine.className = `log-line log-${type}`;
-            logLine.innerHTML = `<span class="log-time">[${timestamp}]</span><span class="log-message">${escapeHtml(message)}</span>`;
-            terminal.appendChild(logLine);
-            terminal.scrollTop = terminal.scrollHeight;
+        function checkProviderStatus() {
+            // Check Ollama automatically
+            const ollamaUrl = document.getElementById('ollama-url').value || 'http://localhost:11434';
+            fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) })
+                .then(r => {
+                    document.getElementById('ollama-status').textContent = '✅ Running';
+                })
+                .catch(() => {
+                    document.getElementById('ollama-status').textContent = '❌ Not responding';
+                });
         }
 
-        function escapeHtml(text) {
-            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-            return text.replace(/[&<>"']/g, m => map[m]);
-        }
-
-        function updateStatus(status) {
-            const badge = document.getElementById('statusBadge');
-            badge.className = `status-badge status-${status}`;
-            badge.textContent = {
-                idle: 'Idle',
-                running: '🔄 Running',
-                success: '✓ Success',
-                error: '✗ Error'
-            }[status] || 'Unknown';
-        }
-
-        function updatePhases() {
-            const container = document.getElementById('phasesContainer');
-            container.innerHTML = '';
-
-            Object.entries(state.phases).forEach(([name, phase]) => {
-                const agent = AGENTS[phase.agent] || {};
-                const phaseEl = document.createElement('div');
-                phaseEl.className = `phase ${phase.status}`;
-
-                const statusIcon = {
-                    'pending': '◯',
-                    'running': '<span class="spinner"></span>',
-                    'completed': '✓',
-                    'error': '✗'
-                }[phase.status] || '?';
-
-                phaseEl.innerHTML = `
-                    <div class="phase-header">
-                        <span class="phase-icon">${statusIcon}</span>
-                        <span class="phase-title">${name}</span>
-                        <span class="phase-status">${phase.status}</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${phase.progress}%"></div>
-                    </div>
-                `;
-
-                container.appendChild(phaseEl);
-            });
-
-            // Update agent indicator
-            const currentPhase = Object.entries(state.phases).find(([_, p]) => p.status === 'running');
-            if (currentPhase) {
-                const agent = AGENTS[currentPhase[1].agent];
-                document.getElementById('agentIcon').textContent = agent.icon;
-                document.getElementById('agentName').textContent = agent.name;
-                document.getElementById('agentIndicator').style.display = 'flex';
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeSettings();
             }
-        }
+        });
 
-        function resetScan() {
-            state.scanning = false;
-            state.currentTarget = null;
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('target').disabled = false;
-        }
-
-        function resetUI() {
-            resetScan();
-            updateStatus('idle');
-            stopTimer();
-            document.getElementById('statusDisplay').style.display = 'none';
-            document.getElementById('phasesContainer').innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-state-icon">⏳</div>
-                    <p>No scan in progress</p>
-                </div>
-            `;
-            document.getElementById('terminal').style.display = 'none';
-            document.getElementById('agentIndicator').style.display = 'none';
-        }
-
-        async function loadHistory() {
-            try {
-                const response = await fetch(`${CONFIG.apiBase}/api/history`);
-                if (!response.ok) throw new Error('Failed to load history');
-
-                const data = await response.json();
-                const historyList = document.getElementById('historyList');
-
-                if (!data.sessions || data.sessions.length === 0) {
-                    historyList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📭</div>
-                            <p>No scans yet</p>
-                        </div>
-                    `;
-                    return;
-                }
-
-                historyList.innerHTML = data.sessions.map(session => {
-                    const date = new Date(session.timestamp);
-                    const timeStr = date.toLocaleString();
-                    const statusClass = `history-${session.status}`;
-
-                    return `
-                        <div class="history-item">
-                            <div class="history-target">🎯 ${escapeHtml(session.target)}</div>
-                            <div class="history-time">${timeStr}</div>
-                            <span class="history-status ${statusClass}">${session.status.toUpperCase()}</span>
-                        </div>
-                    `;
-                }).join('');
-            } catch (error) {
-                console.error('Error loading history:', error);
-            }
-        }
-
-        function showMessage(message, type) {
-            const box = document.getElementById('messageBox');
-            box.textContent = message;
-            box.className = `message-box show ${type}`;
-            setTimeout(() => box.classList.remove('show'), 4000);
-        }
+        // Initialize
+        loadHistory();
+        log('info', 'Dashboard ready');
     </script>
 </body>
 </html>

@@ -189,6 +189,167 @@ def server():
         return 1
 
 
+@cli.command()
+@click.option("--attach", is_flag=True, help="Attach to existing session if running")
+def server_launch(attach):
+    """Launch SecureFlow server in a screen session."""
+    import subprocess
+    import time
+
+    session_name = "secureflow-server"
+
+    # Check if screen session already exists
+    try:
+        result = subprocess.run(
+            ["screen", "-list"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        session_exists = session_name in result.stdout
+    except Exception:
+        session_exists = False
+
+    if session_exists:
+        if attach:
+            click.secho(f"📺 Attaching to existing screen session: {session_name}\n", fg="cyan")
+            try:
+                os.execvp("screen", ["screen", "-r", session_name])
+            except Exception as e:
+                click.secho(f"❌ Failed to attach: {e}", fg="red")
+                return 1
+        else:
+            click.secho(f"✅ Server is already running in screen session: {session_name}", fg="green")
+            click.secho(f"   To attach: secureflow server-launch --attach", fg="cyan")
+            click.secho(f"   To stop: screen -S {session_name} -X quit", fg="cyan")
+            return 0
+
+    # Create new screen session and start server
+    click.secho(f"🚀 Starting server in new screen session: {session_name}\n", fg="blue", bold=True)
+
+    try:
+        # Get python path
+        python_path = sys.executable
+
+        # Create screen session and run server
+        subprocess.Popen([
+            "screen",
+            "-dmS", session_name,
+            python_path, "-m", "secureflow", "server"
+        ])
+
+        click.secho(f"✅ Server launched in screen session", fg="green")
+        click.secho(f"   Session name: {session_name}", fg="green")
+        click.secho(f"   Dashboard: http://localhost:5000/ui", fg="cyan")
+        click.secho(f"   To attach: secureflow server-launch --attach", fg="cyan")
+        click.secho(f"   To stop: screen -S {session_name} -X quit", fg="cyan")
+        return 0
+
+    except Exception as e:
+        click.secho(f"❌ Failed to launch server: {e}", fg="red", bold=True)
+        logger.error(f"server-launch failed: {str(e)}", exc_info=True)
+        return 1
+
+
+@cli.command()
+def tui():
+    """Launch interactive TUI management interface."""
+    click.secho("\n📊 SecureFlow TUI Management Interface\n", fg="cyan", bold=True)
+    click.secho("=" * 60, fg="cyan")
+
+    try:
+        from secureflow.config import LLMProviderStatus
+        import requests
+        import time
+
+        # Check server status
+        try:
+            response = requests.get("http://localhost:5000/crew_status", timeout=2)
+            server_status = response.json() if response.status_code == 200 else None
+        except Exception:
+            server_status = None
+
+        # Display status
+        if server_status:
+            click.secho("✅ Server Status: RUNNING", fg="green")
+            click.secho(f"   Host: localhost:5000", fg="cyan")
+            click.secho(f"   Dashboard: http://localhost:5000/ui", fg="cyan")
+        else:
+            click.secho("⚠️  Server Status: NOT RUNNING", fg="yellow")
+            click.secho("   Start with: secureflow server-launch", fg="yellow")
+
+        # Display provider status
+        click.secho("\n🔌 Provider Status:", fg="cyan")
+        providers = LLMProviderStatus.get_available_providers()
+        if providers:
+            for provider, priority in providers:
+                status = "✅" if LLMProviderStatus.check_health(provider) else "❌"
+                click.secho(f"   {status} {provider.upper():<10} (Priority: {priority})", fg="green" if status == "✅" else "red")
+        else:
+            click.secho("   ❌ No providers configured", fg="red")
+
+        # Display quick stats
+        from secureflow.crew.history import SessionHistory
+        history = SessionHistory()
+        sessions = history.get_sessions(limit=5)
+
+        click.secho("\n📈 Recent Sessions:", fg="cyan")
+        if sessions:
+            for s in sessions[:5]:
+                status_color = "green" if s["status"] == "success" else "red"
+                click.secho(f"   {s['type']:8} | {s['target'][:30]:30} | {s['status']:8}", fg=status_color)
+        else:
+            click.secho("   (No sessions yet)", fg="white")
+
+        click.secho("\n" + "=" * 60, fg="cyan")
+        click.secho("Commands:", fg="cyan", bold=True)
+        click.secho("  secureflow scan <target>          Run security scan", fg="cyan")
+        click.secho("  secureflow build '<task>'         Build application", fg="cyan")
+        click.secho("  secureflow server-launch          Start server", fg="cyan")
+        click.secho("  secureflow config                 Configure providers", fg="cyan")
+        click.secho("  secureflow history                View session history", fg="cyan")
+
+        return 0
+
+    except Exception as e:
+        click.secho(f"\n❌ Error: {str(e)}", fg="red", bold=True)
+        logger.error(f"TUI failed: {str(e)}", exc_info=True)
+        return 1
+
+
+@cli.command()
+def config():
+    """Configure SecureFlow providers and settings."""
+    import subprocess
+
+    click.secho("\n⚙️  SecureFlow Configuration\n", fg="cyan", bold=True)
+    click.secho("=" * 60, fg="cyan")
+
+    # Open dashboard config page
+    dashboard_url = "http://localhost:5000/ui"
+    click.secho("📊 Opening configuration dashboard...", fg="blue")
+    click.secho(f"   URL: {dashboard_url}", fg="cyan")
+    click.secho("\n📋 Provider Configuration:", fg="cyan")
+    click.secho("   1. Go to http://localhost:5000/ui", fg="cyan")
+    click.secho("   2. Click 'Settings' in the interface", fg="cyan")
+    click.secho("   3. Configure your LLM providers:", fg="cyan")
+    click.secho("      - Claude (Anthropic API)", fg="dim")
+    click.secho("      - Gemini (Google AI Studio)", fg="dim")
+    click.secho("      - Ollama (Local, free)", fg="dim")
+    click.secho("   4. Test each provider connection", fg="cyan")
+    click.secho("   5. Set provider priorities and quotas", fg="cyan")
+
+    # Try to open browser
+    try:
+        subprocess.Popen(["xdg-open" if sys.platform != "darwin" else "open", dashboard_url])
+        click.secho("\n✅ Dashboard opened in browser", fg="green")
+    except Exception:
+        click.secho(f"\n⚠️  Could not open browser. Visit {dashboard_url} manually", fg="yellow")
+
+    click.secho("\n" + "=" * 60, fg="cyan")
+    return 0
+
+
 def _check_python():
     """Check Python version."""
     import sys
