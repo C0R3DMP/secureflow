@@ -4,32 +4,32 @@ from secureflow.crew.tools import (
     save_findings_to_context, read_context_findings,
     get_all_findings, get_latest_findings
 )
-from secureflow.config import get_llm_with_rate_limit_fallback
+from secureflow.config import (
+    get_best_available_llm,
+    get_claude_cli_llm,
+    get_gemini_cli_llm,
+    get_llm_with_rate_limit_fallback,
+    is_claude_cli_available,
+    is_gemini_cli_available
+)
 import os
+import logging
 
-# LLM Configuration with fallback chain: Claude → Gemini → Ollama
+logger = logging.getLogger(__name__)
 
-def get_claude_llm():
-    """Claude agent with fallback to Gemini then Ollama."""
-    return LLM(
-        model="anthropic/claude-sonnet-4-6",
-        temperature=0.7,
-        api_key=os.getenv("ANTHROPIC_API_KEY", "")
-    )
+# LLM Configuration with fallback chain: Claude CLI → Gemini CLI → API providers → Ollama
 
-def get_gemini_llm():
-    """Gemini agent with automatic 429 fallback to Ollama."""
-    return get_llm_with_rate_limit_fallback(
-        model="gemini/gemini-2.5-flash",
-        temperature=0.7
-    )
+def get_primary_llm():
+    """Get best available LLM - Claude CLI first, then others."""
+    return get_best_available_llm(temperature=0.7)
 
-def get_ollama_reporter():
-    """Ollama for report generation and analysis."""
-    return LLM(
-        model="ollama/qwen2.5-coder:7b",
-        base_url="http://localhost:11434"
-    )
+def get_secondary_llm():
+    """Get secondary LLM for fallback."""
+    return get_best_available_llm(temperature=0.7)
+
+def get_reporting_llm():
+    """Get LLM for report generation - prefers Claude then Gemini."""
+    return get_best_available_llm(temperature=0.5)
 
 
 class CrewAgents:
@@ -37,56 +37,97 @@ class CrewAgents:
 
     @staticmethod
     def create_recon_agent():
-        """Fast reconnaissance agent using Gemini."""
+        """Fast reconnaissance agent - primary LLM (Claude CLI preferred)."""
         return Agent(
-            role="Security Reconnaissance Specialist",
-            goal="Discover network topology, open ports, running services, and preliminary vulnerability surface. Save findings to shared context.",
+            role="Expert Penetration Tester - Reconnaissance",
+            goal=(
+                "Execute comprehensive network reconnaissance to identify ALL open ports, services, versions, "
+                "and vulnerabilities. You MUST use the nmap_scan tool. Report findings in structured format."
+            ),
             backstory=(
-                "Expert in network mapping and service enumeration. Uses aggressive but safe "
-                "scanning techniques to build complete target profiles. Fast thinker who prioritizes "
-                "speed and breadth over depth. Always saves findings to shared context so other agents can learn."
+                "Veteran penetration tester with 15+ years of experience in network security testing. "
+                "Expert in port scanning, service fingerprinting, and vulnerability discovery. "
+                "Known for being thorough and meticulous - never miss open ports or vulnerable services. "
+                "\n\nYOUR EXACT WORKFLOW:\n"
+                "1. Use 'nmap_scan' tool to scan target comprehensively (top 1000+ ports)\n"
+                "2. For each open port, look up CVEs using 'lookup_cves' tool\n"
+                "3. Save ALL findings to context with 'save_findings_to_context' key='recon_scan_results'\n"
+                "4. Return structured output: Port | Service | Version | CVEs | Risk\n"
+                "\nYour reconnaissance is the foundation for all downstream security analysis. "
+                "Never skip steps. Always save findings to shared context immediately."
             ),
             tools=[run_nmap_scan, lookup_cves, save_findings_to_context, get_latest_findings],
             verbose=True,
             max_iter=5,
             allow_delegation=False,
-            llm=get_gemini_llm(),
+            llm=get_primary_llm(),
         )
 
     @staticmethod
     def create_analyst_agent():
-        """Deep analysis agent using Claude."""
+        """Deep analysis agent - secondary LLM (Claude or Gemini)."""
         return Agent(
-            role="Vulnerability Analysis Expert",
-            goal="Read recon findings from shared context. Analyze discovered vulnerabilities, correlate CVEs, assess risk, and identify exploitation paths. Save analysis to context.",
+            role="Senior Vulnerability Analyst - Technical Expert",
+            goal=(
+                "Read reconnaissance findings from shared context. Perform deep vulnerability analysis, "
+                "correlate CVEs, assess exploitability and business impact. Identify exploitation chains and lateral movement paths."
+            ),
             backstory=(
-                "Senior security researcher with 15+ years of experience. Known for deep technical "
-                "analysis and connecting disparate findings into coherent threat narratives. Methodical "
-                "and thorough, never misses critical details. Always reads previous agent findings from shared context before analyzing."
+                "Senior security analyst with 20+ years in vulnerability assessment and exploit development. "
+                "Holds OSCP, CEH, and published CVE research. Known for connecting security findings into coherent attack narratives. "
+                "\n\nYOUR EXACT WORKFLOW:\n"
+                "1. Read recon findings: read_context_findings(agent_name='recon', key='recon_scan_results')\n"
+                "2. For EACH service:\n"
+                "   - Use lookup_cves to find CVEs\n"
+                "   - Use assess_service to test exploitability\n"
+                "   - Rate: CRITICAL | HIGH | MEDIUM | LOW\n"
+                "3. Identify attack chains (RCE, lateral movement, escalation)\n"
+                "4. Top 5 exploitable vulns with real-world PoC approaches\n"
+                "5. Save analysis: save_findings_to_context key='vulnerability_analysis'\n"
+                "\nNever overlook critical vulnerabilities. Focus on exploitability, not just CVSS scores. "
+                "Quality analysis catches real breaches."
             ),
             tools=[assess_service, lookup_cves, read_context_findings, save_findings_to_context, get_all_findings],
             verbose=True,
             max_iter=7,
             allow_delegation=False,
-            llm=get_claude_llm(),
+            llm=get_secondary_llm(),
         )
 
     @staticmethod
     def create_reporter_agent():
-        """Reporting agent using Ollama for documentation."""
+        """Reporting agent - professional report writer."""
         return Agent(
-            role="Security Report Specialist",
-            goal="Read all recon and analysis findings from shared context. Create comprehensive, executive-friendly security reports with clear remediation roadmaps",
+            role="Professional Security Report Writer",
+            goal=(
+                "Read ALL recon and analysis findings from shared context. Generate executive-ready penetration test report "
+                "with complete findings, risk ratings, remediation roadmap, and clear business-aligned recommendations."
+            ),
             backstory=(
-                "Former CISO who bridges the gap between technical security and business needs. "
-                "Excels at translating complex findings into actionable, prioritized remediation "
-                "strategies that stakeholders understand and support. Always reads all previous agent findings from shared context."
+                "Former CISO with 25+ years in enterprise security. Expert at translating technical security findings "
+                "into compelling executive narratives that drive C-suite decision-making. "
+                "\n\nYOUR EXACT REPORT STRUCTURE:\n"
+                "1. Read ALL findings from context:\n"
+                "   - read_context_findings(agent_name='recon', key='recon_scan_results')\n"
+                "   - read_context_findings(agent_name='analyst', key='vulnerability_analysis')\n"
+                "2. Executive Summary (1 page, non-technical):\n"
+                "   - Risk posture, top findings, business impact, timeline\n"
+                "3. Detailed Findings Table:\n"
+                "   - Risk | CVSS | Port | Service | Vulnerability | Impact | Remediation\n"
+                "   - Sort by severity (CRITICAL first)\n"
+                "4. 90-Day Remediation Roadmap:\n"
+                "   - Weeks 1-2: Critical patches | Weeks 3-4: High fixes\n"
+                "   - Month 2: Medium hardening | Month 3: Long-term\n"
+                "5. Technical Appendix:\n"
+                "   - Methodology, tools, scope, limitations\n"
+                "6. Save report: save_findings_to_context key='final_report'\n"
+                "\nWrite reports that get funded and implemented. This may be presented to the board."
             ),
             tools=[read_context_findings, get_all_findings, get_latest_findings, save_findings_to_context],
             verbose=True,
             max_iter=4,
             allow_delegation=False,
-            llm=get_ollama_reporter(),
+            llm=get_reporting_llm(),
         )
 
 class DevAgents:
@@ -94,62 +135,123 @@ class DevAgents:
 
     @staticmethod
     def create_architect_agent():
-        """System architecture design agent using Claude."""
+        """System architecture design agent."""
         from secureflow.crew.tools import design_system, recommend_stack, plan_structure
 
         return Agent(
-            role="Software Architect",
-            goal="Design robust system architecture, choose optimal technology stack, and plan scalable project structure. Save design to shared context for developers.",
+            role="Principal Software Architect",
+            goal=(
+                "Design robust, scalable system architecture. Evaluate and recommend optimal technology stack. "
+                "Plan complete project structure for developers to implement. Save all decisions to shared context."
+            ),
             backstory=(
-                "Principal architect with 20+ years of experience designing large-scale systems. "
-                "Expert in pattern recognition, technology evaluation, and translating requirements "
-                "into elegant architectural designs that teams can build upon. Always saves architectural decisions to shared context."
+                "Principal architect with 25+ years designing large-scale systems at Google, Amazon, and Meta. "
+                "Expert in microservices, cloud architecture, and technology selection. "
+                "\n\nYOUR EXACT PROCESS:\n"
+                "1. Analyze requirements thoroughly\n"
+                "2. Design architecture with:\n"
+                "   - Components and responsibilities\n"
+                "   - Data flow diagrams\n"
+                "   - Integration points\n"
+                "   - Scalability plan\n"
+                "3. Recommend stack:\n"
+                "   - Frameworks with justification\n"
+                "   - Database choice\n"
+                "   - Caching strategy\n"
+                "   - Deployment approach\n"
+                "4. Plan project structure:\n"
+                "   - Directory layout\n"
+                "   - Module organization\n"
+                "   - Build configuration\n"
+                "5. Save design: save_findings_to_context key='architecture_design'\n"
+                "\nYour design determines quality. Be thorough and opinionated."
             ),
             tools=[design_system, recommend_stack, plan_structure, save_findings_to_context, get_latest_findings],
             verbose=True,
             max_iter=6,
             allow_delegation=False,
-            llm=get_claude_llm(),
+            llm=get_primary_llm(),
         )
 
     @staticmethod
     def create_developer_agent():
-        """Code implementation agent using Gemini."""
+        """Code implementation agent."""
         from secureflow.crew.tools import write_code, create_file, test_code
 
         return Agent(
-            role="Senior Software Developer",
-            goal="Read architecture from shared context. Write production-quality code, implement features, and create well-structured project files. Save code to context.",
+            role="Senior Fullstack Developer",
+            goal=(
+                "Read architecture design from shared context. Implement production-ready code with strong testing, "
+                "clean structure, and comprehensive documentation. Save all code to shared context."
+            ),
             backstory=(
-                "Fullstack developer with 15+ years of experience building scalable applications. "
-                "Known for writing clean, maintainable code, strong testing practices, and mentoring "
-                "junior developers. Stays current with best practices and modern frameworks. Always reads architect's design before coding."
+                "Fullstack engineer with 18+ years building production systems at major tech companies. "
+                "Expert in Python, JavaScript, databases, and cloud deployment. "
+                "\n\nYOUR EXACT WORKFLOW:\n"
+                "1. Read architecture: read_context_findings(agent_name='architect', key='architecture_design')\n"
+                "2. Implement production-quality code for:\n"
+                "   - Core modules\n"
+                "   - Business logic\n"
+                "   - API endpoints\n"
+                "   - Database models\n"
+                "   - Configuration\n"
+                "3. Create all files:\n"
+                "   - Organized source code\n"
+                "   - Config files (setup.py, package.json)\n"
+                "   - Init scripts, test stubs, docs\n"
+                "4. Follow best practices:\n"
+                "   - Error handling\n"
+                "   - Logging and observability\n"
+                "   - Security and performance\n"
+                "5. Save code: save_findings_to_context key='implementation_code'\n"
+                "\nWrite code you'll support for 5+ years in production. Quality is paramount."
             ),
             tools=[write_code, create_file, test_code, read_context_findings, save_findings_to_context, get_all_findings],
             verbose=True,
             max_iter=8,
             allow_delegation=False,
-            llm=get_gemini_llm(),
+            llm=get_secondary_llm(),
         )
 
     @staticmethod
     def create_reviewer_agent():
-        """Code quality review agent using Ollama."""
+        """Code quality review agent."""
         from secureflow.crew.tools import review_code, suggest_improvements, find_bugs
 
         return Agent(
-            role="Code Quality Reviewer",
-            goal="Read architecture and code from shared context. Review code for quality, identify bugs, and suggest improvements for maintainability.",
+            role="Principal Code Reviewer - Quality Expert",
+            goal=(
+                "Read architecture and implementation code from shared context. Perform comprehensive code review, "
+                "identify bugs and security issues, suggest improvements. Ensure code meets production standards."
+            ),
             backstory=(
-                "Senior engineer and code review expert with deep knowledge of software design principles. "
-                "Excels at identifying subtle bugs, security issues, and architectural problems. "
-                "Provides constructive feedback that improves team quality and developer growth. Always reads previous agent work from shared context."
+                "Principal engineer with 20+ years in code quality and security review. "
+                "Former tech lead at security-critical companies. "
+                "\n\nYOUR EXACT REVIEW PROCESS:\n"
+                "1. Read architecture & code from context:\n"
+                "   - read_context_findings(agent_name='architect', key='architecture_design')\n"
+                "   - read_context_findings(agent_name='developer', key='implementation_code')\n"
+                "2. Review for quality:\n"
+                "   - Code clarity and maintainability\n"
+                "   - Bugs and logical errors\n"
+                "   - Security (OWASP top 10)\n"
+                "   - Performance\n"
+                "   - Test coverage\n"
+                "   - Documentation\n"
+                "3. Rate issues:\n"
+                "   - CRITICAL: Security, data loss, system failure\n"
+                "   - HIGH: Major bugs, architecture violations\n"
+                "   - MEDIUM: Performance, maintainability\n"
+                "   - LOW: Style, minor improvements\n"
+                "4. Provide specific code recommendations\n"
+                "5. Save review: save_findings_to_context key='code_review'\n"
+                "\nQuality gates are in your hands. Find real problems before production."
             ),
             tools=[review_code, suggest_improvements, find_bugs, read_context_findings, get_all_findings, get_latest_findings],
             verbose=True,
             max_iter=5,
             allow_delegation=False,
-            llm=get_ollama_reporter(),
+            llm=get_reporting_llm(),
         )
 
 

@@ -1,3 +1,4 @@
+import socket
 import subprocess
 import json
 import time
@@ -5,6 +6,23 @@ import requests
 from typing import Dict, List, Any
 import re
 from crewai.tools import tool
+
+# Common ports for socket fallback scanner
+_COMMON_PORTS = [
+    21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143,
+    443, 445, 993, 995, 1723, 3306, 3389, 5432, 5900,
+    6379, 8080, 8443, 8888, 27017,
+]
+
+_SERVICE_NAMES = {
+    21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns",
+    80: "http", 110: "pop3", 111: "rpcbind", 135: "msrpc",
+    139: "netbios-ssn", 143: "imap", 443: "https", 445: "smb",
+    993: "imaps", 995: "pop3s", 1723: "pptp", 3306: "mysql",
+    3389: "rdp", 5432: "postgresql", 5900: "vnc", 6379: "redis",
+    8080: "http-alt", 8443: "https-alt", 8888: "http-alt", 27017: "mongodb",
+}
+
 
 class SecurityTools:
     """Security scanning and lookup tools for the crew."""
@@ -15,39 +33,75 @@ class SecurityTools:
 
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
-        Run nmap scan on target. Returns structured port/service data.
-        Uses -Pn (no ping) and -sV (version detection).
+        Scan target for open ports and services.
+        Primary: nmap -Pn -sV --top-ports=50
+        Fallback: socket-based scanner if nmap unavailable or times out.
         """
         try:
-            cmd = ["nmap", "-Pn", "-sV", "--top-ports=100"]
+            cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
                 cmd.append("-v")
             cmd.append(target)
 
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120
+                cmd, capture_output=True, text=True, timeout=60
             )
 
-            if result.returncode != 0 and "nmap: command not found" in result.stderr:
+            if result.returncode == 0 or (result.stdout and "Nmap scan report" in result.stdout):
                 return {
-                    "status": "error",
-                    "message": "nmap not installed. Install with: sudo apt-get install nmap"
+                    "status": "success",
+                    "scanner": "nmap",
+                    "target": target,
+                    "output": result.stdout,
+                    "stderr": result.stderr if result.stderr else None,
                 }
 
-            return {
-                "status": "success",
-                "target": target,
-                "output": result.stdout,
-                "stderr": result.stderr if result.stderr else None
-            }
+            # nmap ran but returned an error — fall through to socket scan
+            raise RuntimeError(result.stderr or "nmap returned non-zero")
 
+        except FileNotFoundError:
+            pass  # nmap not installed → socket fallback
         except subprocess.TimeoutExpired:
-            return {"status": "error", "message": f"Scan timeout for {target}"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+            pass  # nmap timed out → socket fallback
+        except Exception:
+            pass  # any other nmap error → socket fallback
+
+        # Socket-based fallback
+        return self._socket_scan(target)
+
+    def _socket_scan(self, target: str, timeout: float = 1.0) -> Dict[str, Any]:
+        """Lightweight socket-based port scanner — no external dependencies."""
+        open_ports = []
+        try:
+            host = socket.gethostbyname(target)
+        except socket.gaierror as e:
+            return {"status": "error", "scanner": "socket", "message": f"DNS resolution failed: {e}"}
+
+        for port in _COMMON_PORTS:
+            try:
+                with socket.create_connection((host, port), timeout=timeout):
+                    service = _SERVICE_NAMES.get(port, "unknown")
+                    open_ports.append({"port": f"{port}/tcp", "state": "open", "service": service})
+            except (socket.timeout, ConnectionRefusedError, OSError):
+                pass
+
+        output_lines = [
+            f"Socket scan report for {target} ({host})",
+            f"Scanned {len(_COMMON_PORTS)} common ports",
+            "",
+        ]
+        for p in open_ports:
+            output_lines.append(f"{p['port']:<12} open   {p['service']}")
+        output_lines.append(f"\n{len(open_ports)} open port(s) found.")
+
+        return {
+            "status": "success",
+            "scanner": "socket",
+            "target": target,
+            "output": "\n".join(output_lines),
+            "open_ports": open_ports,
+            "note": "nmap unavailable — used socket scanner (no version detection)",
+        }
 
     def parse_nmap_output(self, nmap_output: str) -> List[Dict[str, str]]:
         """Parse nmap output to extract open ports and services."""
@@ -79,31 +133,35 @@ class SecurityTools:
         self.last_api_call = time.time()
 
         try:
-            params = {"keyword": product}
-            if version:
-                params["keyword"] = f"{product} {version}"
+            keyword = f"{product} {version}".strip() if version else product
+            params = {"keywordSearch": keyword, "resultsPerPage": 10}
 
             response = requests.get(
-                "https://services.nvd.nist.gov/rest/json/cves/1.0",
+                "https://services.nvd.nist.gov/rest/json/cves/2.0",
                 params=params,
-                timeout=10
+                timeout=15
             )
 
             if response.status_code == 200:
                 data = response.json()
-                cves = data.get("result", {}).get("CVE_Items", [])
+                vulns = data.get("vulnerabilities", [])
                 result = {
                     "status": "success",
                     "product": product,
                     "version": version,
-                    "cve_count": len(cves),
+                    "cve_count": len(vulns),
                     "cves": [
                         {
-                            "id": item.get("cve", {}).get("CVE_data_meta", {}).get("ID", ""),
-                            "description": item.get("cve", {}).get("description", {}).get("description_data", [{}])[0].get("value", ""),
-                            "score": item.get("impact", {}).get("baseMetricV3", {}).get("cvssV3", {}).get("baseScore", 0)
+                            "id": v.get("cve", {}).get("id", ""),
+                            "description": (v.get("cve", {}).get("descriptions") or [{}])[0].get("value", ""),
+                            "score": (
+                                v.get("cve", {}).get("metrics", {})
+                                 .get("cvssMetricV31", [{}])[0]
+                                 .get("cvssData", {})
+                                 .get("baseScore", 0)
+                            )
                         }
-                        for item in cves[:10]
+                        for v in vulns
                     ]
                 }
                 self.cve_cache[cache_key] = result
