@@ -114,7 +114,7 @@ def init_llms():
     config = {
         "gemini": {
             "api_key": GEMINI_API_KEY,
-            "model": "gemini/gemini-2.0-flash",
+            "model": "gemini/gemini-2.5-flash",
         },
         "ollama": {
             "base_url": OLLAMA_BASE_URL,
@@ -126,7 +126,7 @@ def init_llms():
 def get_fallback_chain():
     """Return the LLM fallback order: Gemini → Ollama (Claude via CLI)."""
     return [
-        {"model": "gemini/gemini-2.0-flash"},
+        {"model": "gemini/gemini-2.5-flash"},
         {"model": "ollama/qwen2.5-coder", "base_url": OLLAMA_BASE_URL},
     ]
 
@@ -205,7 +205,7 @@ def call_opencode(prompt: str, opencode_url: str = "http://localhost:4096", max_
         raise RuntimeError(f"OpenCode error: {str(e)}")
 
 
-def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.0-flash", temperature=0.7, max_tokens=4096):
+def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperature=0.7, max_tokens=4096):
     """
     Create an LLM instance with intelligent fallback strategy:
     1. Try primary model (e.g., gemini-2.0-flash)
@@ -227,7 +227,7 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.0-flash", temperatur
         try:
             logger.info("Attempting gemini-1.5-flash as fallback...")
             return LLM(
-                model="gemini/gemini-1.5-flash",
+                model="gemini/gemini-2.5-flash-lite",
                 api_key=GEMINI_API_KEY,
                 temperature=temperature
             )
@@ -273,7 +273,7 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.0-flash", temperatur
                             try:
                                 logger.info("Switching to gemini-1.5-flash...")
                                 fallback_llm = LLM(
-                                    model="gemini/gemini-1.5-flash",
+                                    model="gemini/gemini-2.5-flash-lite",
                                     api_key=GEMINI_API_KEY,
                                     temperature=self.temperature
                                 )
@@ -315,7 +315,7 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.0-flash", temperatur
             try:
                 logger.info("Attempting gemini-1.5-flash on init failure...")
                 return LLM(
-                    model="gemini/gemini-1.5-flash",
+                    model="gemini/gemini-2.5-flash-lite",
                     api_key=GEMINI_API_KEY,
                     temperature=temperature
                 )
@@ -337,7 +337,7 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.0-flash", temperatur
 def completion_with_fallback(messages, model="gemini", temperature=0.7, max_tokens=4096):
     """Execute completion with automatic fallback routing (Gemini → Ollama on 429)."""
     fallback_models = [
-        "gemini/gemini-2.0-flash",
+        "gemini/gemini-2.5-flash",
         "ollama/qwen2.5-coder",
     ]
 

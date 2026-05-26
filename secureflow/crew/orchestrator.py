@@ -163,7 +163,9 @@ class CrewOrchestrator:
 
     def _format_report(self, target: str, content: str) -> str:
         """Format crew output as professional HTML report."""
+        import html
         from datetime import datetime
+        content = html.escape(content)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

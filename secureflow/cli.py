@@ -404,6 +404,7 @@ def _check_env_vars():
     """Check important environment variables."""
     vars_to_check = {
         "MCP_SECRET": os.getenv("MCP_SECRET"),
+        "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY"),
         "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY"),
         "OPENCODE_URL": os.getenv("OPENCODE_URL"),
         "OLLAMA_BASE_URL": os.getenv("OLLAMA_BASE_URL"),

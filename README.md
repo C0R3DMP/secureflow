@@ -6,7 +6,7 @@ SecureFlow is a comprehensive AI-powered system for security assessment and appl
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests Passing](https://img.shields.io/badge/tests-47%2F47%20passing-brightgreen)](https://github.com/secureflow/secureflow)
+[![Tests Passing](https://img.shields.io/badge/tests-74%2F74%20passing-brightgreen)](https://github.com/secureflow/secureflow)
 [![GitHub stars](https://img.shields.io/github/stars/secureflow/secureflow?style=social)](https://github.com/secureflow/secureflow)
 ## Features
 
@@ -224,7 +224,7 @@ secureflow/
 │       ├── orchestrator.py      # Security workflow
 │       ├── dev_orchestrator.py  # Dev workflow
 │       ├── memory.py    # Shared context (SQLite)
-│       └── chat.py      # Inter-agent messaging
+│       └── history.py   # Persistent session history
 ├── tests/               # Test suite
 ├── docs/                # Documentation
 └── pyproject.toml       # Package metadata

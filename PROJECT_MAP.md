@@ -402,3 +402,121 @@ Try Gemini 2.0 Flash
 > **ASSUMPTION recorded:** Dev Crew (architect/developer/reviewer) has the same B3 pattern in
 > `dev_orchestrator.py`. It is not audited in detail here but the same fix from M1 applies.
 > Confirm before M1 work begins.
+
+---
+
+## [AUDIT — 2026-05-26 POST-M6]
+> Full codebase re-read: cli.py, agents.py, orchestrator.py, config.py, memory.py, server.py
+> Test run: **74/74 passing**
+> Installed vs latest versions verified via `pip index versions`
+
+### DEPENDENCY STATUS (post-M6)
+
+| Package  | Installed | Latest PyPI  | Gap            | Risk   |
+|----------|-----------|--------------|----------------|--------|
+| crewai   | 0.80.0    | **1.14.5**   | 14 minor+major | HIGH   |
+| fastmcp  | 3.3.1     | 3.3.1        | none           | OK     |
+| litellm  | 1.86.0    | 1.86.1       | 1 patch        | LOW    |
+| click    | 8.4.1     | 8.4.1        | none           | OK     |
+| pydantic | 2.13.4    | 2.13.4       | none           | OK     |
+
+**crewai 0.80.0 → 1.14.5:** Major API changes in 1.x series. Active Pydantic v1
+deprecation warnings already present in test output. Not upgrade-in-place safe.
+
+### NEW ORPHANS & BUGS (post-M6 audit)
+
+| ID   | Severity | Location                   | Description                                                                           |
+|------|----------|----------------------------|---------------------------------------------------------------------------------------|
+| NB1  | HIGH     | `server.py:53-80`          | **Blocking sync in async context.** `run_security_crew()` blocks the FastMCP asyncio event loop for 2-5 min per scan. |
+| NB2  | MEDIUM   | `orchestrator.py:164-243`  | **XSS in HTML report.** LLM output (`content`) interpolated into `<pre>` without `html.escape()`. |
+| NO1  | MEDIUM   | `cli.py:403-415`           | `ANTHROPIC_API_KEY` absent from `_check_env_vars()` — Analyst agent hard-depends on it, health check misleads. |
+| NO2  | LOW      | `README.md:9`              | Test badge shows `47/47` — actual: **74 tests**. |
+| NO3  | LOW      | `README.md:228`            | `chat.py` listed in architecture — file does not exist (logic moved to `memory.py`). |
+| NO4  | LOW      | `setup.py`                 | Legacy `setup.py` coexists with `pyproject.toml`. Ambiguous build source. |
+| NO5  | LOW      | `agents.py:22`, `config.py:114` | `gemini-2.0-flash` — deprecated path; `gemini-2.5-flash` is current stable. |
+| NO6  | INFO     | `pyproject.toml:32`        | `crewai==0.80.0` exact pin inconsistent with loose `fastmcp>=0.2.0` pin. |
+
+---
+
+## [MILESTONES — M7 to M11]
+
+### M7 — Code Health & Dependency Stabilization ✅ COMPLETED (2026-05-26)
+**Scope:** Zero feature additions. Pure stabilization.
+**Verifiable goal:** ✅ 74/74 passing | ✅ Zero Pydantic deprecation warnings | ✅ All fixes applied
+
+Tasks:
+- [x] Upgrade `crewai` `0.80.0` → `1.14.5` + add `crewai[anthropic]` extra — required by 1.x native provider
+- [x] Fix NB2: `orchestrator.py::_format_report()` — added `html.escape(content)` before interpolation
+- [x] Fix NO1: added `ANTHROPIC_API_KEY` to `_check_env_vars()` in `cli.py`
+- [x] Fix NO2: updated README badge to `74/74`
+- [x] Fix NO3: removed `chat.py` from README, replaced with `history.py`
+- [x] Fix NO4: deleted `setup.py`
+- [x] Fix NO5: updated `gemini-2.0-flash` → `gemini-2.5-flash`, fallback `gemini-1.5-flash` → `gemini-2.5-flash-lite`
+- [x] Updated `pyproject.toml`: `crewai[anthropic]==1.14.5`, `fastmcp>=3.0.0`, `litellm>=1.86.0`
+
+**Remaining warnings (30 total):** Internal crewai 1.14.5 `DeprecationWarning` from crewai's own `agent/core.py` — not from our code, not actionable.
+
+---
+
+### M8 — Non-Blocking Async Scan Execution
+**Scope:** Server concurrency. CLI behavior unchanged.
+**Verifiable goal:** Two concurrent `POST /tools/run_security_crew` requests both complete; `/crew_status` returns HTTP 200 during an active scan (event loop not blocked).
+
+Tasks:
+1. Wrap `orchestrator.run_security_crew()` call in `server.py` with `asyncio.get_event_loop().run_in_executor(None, ...)` — one-line change per tool
+2. Same fix for `dev_orchestrator.run_dev_crew()` in `server.py`
+3. Add `scan_id` (UUID4) to each tool response for client tracking
+4. Update SSE `/stream/{target}` to key on `scan_id` instead of bare target string
+5. New test: mock-concurrent requests assert no blocking
+
+---
+
+### M9 — Report Export (PDF + JSON)
+**Scope:** Output format options for CLI and API.
+**Verifiable goal:** `secureflow scan scanme.nmap.org --format pdf` produces a valid PDF in `~/.secureflow/`; `--format json` produces parseable JSON with all findings.
+
+Tasks:
+1. Add `--format [html|pdf|json]` flag to `secureflow scan` CLI command
+2. PDF backend: `weasyprint>=60.0` added to `[project.optional-dependencies]` as `export` extra
+3. JSON: serialize `SharedContext.export_summary()` to structured dict via `json.dumps`
+4. Expose `GET /api/reports/{target}/export?format=pdf|json` on server
+5. Tests for each export path
+
+**Note:** If `weasyprint` footprint (~20MB) is unacceptable, swap to `fpdf2` (lighter, no CSS).
+
+---
+
+### M10 — Generic Webhook Notifications
+**Scope:** Replace Telegram-only notification with generic webhook + Telegram as a provider.
+**Verifiable goal:** Setting `WEBHOOK_URL=<url>` triggers a `POST` with JSON payload within 5 seconds of scan completion; existing `TELEGRAM_BOT_TOKEN` path still works.
+
+Tasks:
+1. New module `secureflow/notifications.py`: `NotificationDispatcher` with `dispatch(event)` method
+2. Provider: `webhook` — HTTP POST, payload `{event, target, status, summary, report_path, timestamp}`, `WEBHOOK_SECRET` signs body as HMAC-SHA256 header
+3. Provider: `telegram` — refactored from `orchestrator.send_notification()`, same env vars
+4. `orchestrator.py` and `dev_orchestrator.py` call `NotificationDispatcher.dispatch()` on completion
+5. Tests: mock HTTP POST, verify HMAC signature, verify Telegram call
+
+---
+
+### M11 — Scheduled Assessments
+**Scope:** Persistent cron-based scan jobs.
+**Verifiable goal:** `secureflow schedule add scanme.nmap.org --cron "0 3 * * *"` persists a job; `secureflow schedule list` shows it after process restart; job executes at scheduled time.
+
+Tasks:
+1. Add `APScheduler>=3.10` to `pyproject.toml` dependencies
+2. New module `secureflow/scheduler.py`: `ScheduleManager` using `APScheduler` with `SQLiteJobStore` backed by `~/.secureflow/schedules.db`
+3. CLI commands: `schedule add <target> --cron <expr>`, `schedule list`, `schedule remove <id>`
+4. Integration with M10 `NotificationDispatcher` for post-execution alerts
+5. Server endpoint `GET /api/schedules` (JSON list for dashboard)
+6. Tests: job CRUD, invalid cron expression raises `ValueError`, mock execution
+
+---
+
+## [ASSUMPTION LOG — 2026-05-26]
+
+1. crewai upgrade (M7) is **prerequisite** for M8-M11 — complete and merge M7 first.
+2. M8–M11 are mutually independent once M7 is green — can be parallelized.
+3. Gemini model migration (NO5) is a single-line change; included in M7 to minimize merge count.
+4. `weasyprint` PDF backend selected for M9 — if dependency size is a constraint, revisit before implementation.
+5. `APScheduler` job store uses SQLite to stay consistent with existing persistence strategy (no Redis dependency introduced).

@@ -20,7 +20,7 @@ def get_claude_llm():
 def get_gemini_llm():
     """Gemini agent with automatic 429 fallback to Ollama."""
     return get_llm_with_rate_limit_fallback(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash",
         temperature=0.7
     )
 
