@@ -11,7 +11,6 @@ def test_crew_orchestrator_instantiation():
 
     assert orchestrator is not None
     assert hasattr(orchestrator, "context")
-    assert hasattr(orchestrator, "communicator")
     assert hasattr(orchestrator, "logger")
 
 
@@ -23,7 +22,6 @@ def test_dev_orchestrator_instantiation():
 
     assert orchestrator is not None
     assert hasattr(orchestrator, "context")
-    assert hasattr(orchestrator, "communicator")
     assert hasattr(orchestrator, "logger")
 
 

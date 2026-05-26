@@ -63,12 +63,6 @@ def test_import_crew_memory():
     assert hasattr(memory, "SharedContext")
 
 
-def test_import_crew_chat():
-    """Test crew chat module import."""
-    from secureflow.crew import chat
-    assert hasattr(chat, "AgentCommunicator")
-
-
 def test_import_crew_orchestrator():
     """Test crew orchestrator module import."""
     from secureflow.crew import orchestrator
@@ -88,7 +82,6 @@ def test_all_crew_modules_importable():
         "secureflow.crew.tasks",
         "secureflow.crew.tools",
         "secureflow.crew.memory",
-        "secureflow.crew.chat",
         "secureflow.crew.orchestrator",
         "secureflow.crew.dev_orchestrator",
     ]

@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 from secureflow.crew.memory import SharedContext
-from secureflow.crew.chat import AgentCommunicator
 from secureflow.crew.tasks import create_dev_crew, create_code_review_tasks
 from secureflow.crew.agents import DevAgents
 from crewai import Crew
@@ -17,7 +16,6 @@ class DevOrchestrator:
 
     def __init__(self, log_path: str = _DEFAULT_LOG):
         self.context = SharedContext()
-        self.communicator = AgentCommunicator(self.context)
         self.log_path = log_path
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         self.logger = self._init_logger()
@@ -149,11 +147,5 @@ class DevOrchestrator:
         context_summary = self.context.export_summary()
         summary.append("FINDINGS:")
         summary.append(context_summary)
-        summary.append("")
-
-        # Export chat log
-        chat_log = self.communicator.export_chat_log()
-        summary.append("COMMUNICATION LOG:")
-        summary.append(chat_log)
 
         return "\n".join(summary)

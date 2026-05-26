@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 from secureflow.crew.memory import SharedContext
-from secureflow.crew.chat import AgentCommunicator
 from secureflow.crew.tasks import create_crew
 
 _DEFAULT_LOG = str(Path.home() / ".secureflow" / "crew_session.log")
@@ -19,7 +18,6 @@ class CrewOrchestrator:
 
     def __init__(self, log_path: str = _DEFAULT_LOG):
         self.context = SharedContext()
-        self.communicator = AgentCommunicator(self.context)
         self.log_path = log_path
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         self.logger = self._init_logger()
@@ -119,6 +117,5 @@ class CrewOrchestrator:
         summary += f"Started: {datetime.now().isoformat()}\n\n"
 
         summary += self.context.export_summary()
-        summary += "\n" + self.communicator.export_chat_log()
 
         return summary
