@@ -7,6 +7,7 @@ const providerEmojis = {
     claude: '🤖',
     gemini: '✨',
     ollama: '🦙',
+    opencode: '💻',
 };
 export function ProviderStatus({ providers, onTest }) {
     const [testing, setTesting] = useState(null);

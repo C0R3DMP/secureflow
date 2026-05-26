@@ -8,6 +8,7 @@ const providerEmojis = {
   claude: '🤖',
   gemini: '✨',
   ollama: '🦙',
+  opencode: '💻',
 }
 
 interface ProviderStatusProps {

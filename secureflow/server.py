@@ -228,38 +228,46 @@ async def stream_scan_sse(request: Request) -> StreamingResponse:
 
     Events format: data: {"event": "<name>", ...}\\n\\n
     """
-    target = request.path_params["target"]
-    event_queue: Queue = Queue()
-    phase_idx = [0]
+    from secureflow.crew.orchestrator import get_message_queue, clear_message_queue
 
-    def _on_task_complete(_task_output) -> None:
-        idx = phase_idx[0]
-        label = _SECURITY_PHASES[idx] if idx < len(_SECURITY_PHASES) else f"Phase {idx + 1}"
-        event_queue.put({"event": "phase_complete", "phase": label, "n": idx + 1, "total": 3})
-        phase_idx[0] += 1
+    target = request.path_params["target"]
+
+    # Get the global message queue from orchestrator
+    msg_queue = get_message_queue()
+    clear_message_queue()
 
     loop = asyncio.get_running_loop()
-    crew = create_crew(target, task_callback=_on_task_complete)
-    future = loop.run_in_executor(None, crew.kickoff)
+
+    # Run crew in executor (blocking operation in thread pool)
+    def _run_crew():
+        orchestrator = CrewOrchestrator()
+        return orchestrator.run_security_crew(target)
+
+    future = loop.run_in_executor(None, _run_crew)
 
     async def _generate():
         yield f"data: {json.dumps({'event': 'start', 'target': target})}\n\n"
 
         while not future.done():
-            await asyncio.sleep(0.5)
-            while True:
+            await asyncio.sleep(0.2)
+            # Drain messages from the global queue
+            while not msg_queue.empty():
                 try:
-                    payload = event_queue.get_nowait()
+                    payload = msg_queue.get_nowait()
                     yield f"data: {json.dumps(payload)}\n\n"
                 except Empty:
                     break
 
-        while not event_queue.empty():
-            payload = event_queue.get_nowait()
-            yield f"data: {json.dumps(payload)}\n\n"
+        # Drain any remaining messages after crew completes
+        while not msg_queue.empty():
+            try:
+                payload = msg_queue.get_nowait()
+                yield f"data: {json.dumps(payload)}\n\n"
+            except Empty:
+                break
 
         result = await future
-        yield f"data: {json.dumps({'event': 'complete', 'result': str(result)[:500]})}\n\n"
+        yield f"data: {json.dumps({'event': 'complete', 'result': result.get('message', 'Assessment complete')})}\n\n"
 
     return StreamingResponse(
         _generate(),

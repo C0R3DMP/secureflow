@@ -24,7 +24,7 @@ export interface PhaseStatus {
 }
 
 export interface Provider {
-  name: 'claude' | 'gemini' | 'ollama'
+  name: 'claude' | 'gemini' | 'ollama' | 'opencode'
   status: 'available' | 'limited' | 'unavailable'
   priority: number
   lastCheck?: Date
@@ -41,11 +41,13 @@ export interface ScanSession {
 }
 
 export interface StreamEvent {
-  event: 'start' | 'phase_complete' | 'complete' | 'error'
+  event: 'start' | 'agent_message' | 'phase_complete' | 'complete' | 'error'
   target?: string
+  agent?: AgentRole
   phase?: string
   n?: number
   total?: number
   result?: string
   message?: string
+  timestamp?: string
 }

@@ -7,11 +7,27 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
+from queue import Queue
 from secureflow.crew.memory import SharedContext
 from secureflow.crew.tasks import create_crew
 from secureflow.crew.history import SessionHistory
 
 _DEFAULT_LOG = str(Path.home() / ".secureflow" / "crew_session.log")
+
+# Global message queue for SSE streaming
+_message_queue: Queue = Queue()
+
+def get_message_queue() -> Queue:
+    """Get the global message queue for SSE streaming."""
+    return _message_queue
+
+def clear_message_queue() -> None:
+    """Clear all messages from the queue."""
+    while not _message_queue.empty():
+        try:
+            _message_queue.get_nowait()
+        except:
+            break
 
 
 class CrewOrchestrator:
@@ -52,12 +68,42 @@ class CrewOrchestrator:
         """Run full security crew (recon → analysis → reporting) as a single unified Crew."""
         self.target = target
         self.context.clear()
+        clear_message_queue()
 
         self.log("INFO", f"🚀 Starting security crew for target: {target}")
         self.log("INFO", "=" * 70)
 
         try:
-            crew = create_crew(target)
+            def _on_task_complete(task_output) -> None:
+                """Callback fired when a task completes."""
+                try:
+                    agent_name = getattr(task_output, 'task', None)
+                    if agent_name:
+                        agent_name = str(agent_name).lower()
+                        if 'recon' in agent_name:
+                            agent_role = 'recon'
+                        elif 'analyst' in agent_name or 'analysis' in agent_name:
+                            agent_role = 'analyst'
+                        elif 'report' in agent_name:
+                            agent_role = 'reporter'
+                        else:
+                            agent_role = 'system'
+                    else:
+                        agent_role = 'system'
+
+                    output_text = str(task_output.raw_output) if hasattr(task_output, 'raw_output') else str(task_output)
+                    message = output_text[:500] if len(output_text) > 500 else output_text
+
+                    _message_queue.put({
+                        'type': 'agent_message',
+                        'agent': agent_role,
+                        'message': message,
+                        'timestamp': datetime.now().isoformat()
+                    })
+                except Exception as e:
+                    self.log("WARN", f"Error in task callback: {str(e)}")
+
+            crew = create_crew(target, task_callback=_on_task_complete)
             result = crew.kickoff()
 
             self.context.write("session", "target", target)

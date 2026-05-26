@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OPENCODE_URL = os.getenv("OPENCODE_URL", "http://localhost:4096")
 MCP_SECRET = os.getenv("MCP_SECRET", "")
 
 # Rate limit tracking
@@ -50,6 +51,12 @@ class LLMProviderStatus:
             "priority": 3,
             "available": is_ollama_available(),
         },
+        "opencode": {
+            "base_url": OPENCODE_URL,
+            "type": "local",
+            "priority": 4,
+            "available": False,  # Check dynamically in check_health
+        },
     }
 
     @staticmethod
@@ -61,6 +68,12 @@ class LLMProviderStatus:
             return bool(GEMINI_API_KEY) and not _rate_limit_fallback.get("gemini_limited", False)
         elif provider == "ollama":
             return is_ollama_available()
+        elif provider == "opencode":
+            try:
+                response = requests.get(f"{OPENCODE_URL}/session", timeout=2)
+                return response.status_code < 500
+            except:
+                return False
         return False
 
     @staticmethod
