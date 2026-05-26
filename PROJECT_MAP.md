@@ -490,16 +490,18 @@ Tasks:
 
 ---
 
-### M10 — Generic Webhook Notifications
+### M10 — Generic Webhook Notifications ✅ COMPLETED (2026-05-26)
 **Scope:** Replace Telegram-only notification with generic webhook + Telegram as a provider.
-**Verifiable goal:** Setting `WEBHOOK_URL=<url>` triggers a `POST` with JSON payload within 5 seconds of scan completion; existing `TELEGRAM_BOT_TOKEN` path still works.
+**Verifiable goal:** ✅ 98/98 passing | ✅ Webhook POST with HMAC | ✅ Telegram still works | ✅ Orchestrators wired
 
 Tasks:
-1. New module `secureflow/notifications.py`: `NotificationDispatcher` with `dispatch(event)` method
-2. Provider: `webhook` — HTTP POST, payload `{event, target, status, summary, report_path, timestamp}`, `WEBHOOK_SECRET` signs body as HMAC-SHA256 header
-3. Provider: `telegram` — refactored from `orchestrator.send_notification()`, same env vars
-4. `orchestrator.py` and `dev_orchestrator.py` call `NotificationDispatcher.dispatch()` on completion
-5. Tests: mock HTTP POST, verify HMAC signature, verify Telegram call
+- [x] New module `secureflow/notifications.py` — `NotificationDispatcher.dispatch(event, target, status, summary, report_path)`
+- [x] Provider `webhook`: HTTP POST JSON · `WEBHOOK_SECRET` → `X-SecureFlow-Signature: sha256=...` header
+- [x] Provider `telegram`: refactored from `orchestrator.send_notification()` (method deleted)
+- [x] `orchestrator.py` wired: `scan_complete` / `scan_failed` on success/error
+- [x] `dev_orchestrator.py` wired: `build_complete` / `build_failed`
+- [x] `server.py` cleaned: removed inline Telegram call
+- [x] 8 tests: instantiation, no-provider silence, webhook call, payload schema, HMAC, Telegram, network error, orchestrator integration
 
 ---
 

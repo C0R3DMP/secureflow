@@ -134,6 +134,15 @@ class CrewOrchestrator:
                 summary=summary
             )
 
+            from secureflow.notifications import NotificationDispatcher
+            NotificationDispatcher().dispatch(
+                event="scan_complete",
+                target=target,
+                status="success",
+                summary=summary,
+                report_path=str(report_path),
+            )
+
             return {
                 "success": True,
                 "target": target,
@@ -146,13 +155,20 @@ class CrewOrchestrator:
         except Exception as e:
             self.log("ERROR", f"Crew execution failed: {str(e)}")
 
-            # Record failed session in history
             history = SessionHistory()
             history.record(
                 session_type="security",
                 target=target,
                 status="error",
                 summary=f"Error: {str(e)[:500]}"
+            )
+
+            from secureflow.notifications import NotificationDispatcher
+            NotificationDispatcher().dispatch(
+                event="scan_failed",
+                target=target,
+                status="error",
+                summary=str(e)[:500],
             )
 
             return {
@@ -244,34 +260,6 @@ class CrewOrchestrator:
 </html>"""
 
         return html
-
-    def send_notification(self, telegram_token: str = "", telegram_chat_id: str = ""):
-        """Send completion notification via Telegram (optional)."""
-        if not telegram_token or not telegram_chat_id:
-            self.log("INFO", "Telegram notification skipped (no credentials)")
-            return
-
-        try:
-            import requests
-
-            message = (
-                f"🤖 Security Crew Completed\n"
-                f"Target: {self.target}\n"
-                f"Session: {self.log_path}\n"
-                f"Timestamp: {datetime.now().isoformat()}"
-            )
-
-            url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-            payload = {"chat_id": telegram_chat_id, "text": message}
-
-            response = requests.post(url, json=payload, timeout=5)
-            if response.status_code == 200:
-                self.log("INFO", "✅ Telegram notification sent")
-            else:
-                self.log("WARN", f"Telegram notification failed: {response.status_code}")
-
-        except Exception as e:
-            self.log("WARN", f"Could not send Telegram notification: {str(e)}")
 
     def export_session(self) -> str:
         """Export full session summary."""

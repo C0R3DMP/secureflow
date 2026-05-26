@@ -6,7 +6,7 @@ SecureFlow is a comprehensive AI-powered system for security assessment and appl
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests Passing](https://img.shields.io/badge/tests-90%2F90%20passing-brightgreen)](https://github.com/secureflow/secureflow)
+[![Tests Passing](https://img.shields.io/badge/tests-98%2F98%20passing-brightgreen)](https://github.com/secureflow/secureflow)
 [![GitHub stars](https://img.shields.io/github/stars/secureflow/secureflow?style=social)](https://github.com/secureflow/secureflow)
 ## Features
 
@@ -378,14 +378,16 @@ pytest tests/test_cli.py::test_cli_version -vv
 - [x] Scan status polling endpoint `/api/scans/{scan_id}` (M8)
 - [x] Report export — HTML, PDF, JSON via `--format` flag (M9)
 - [x] Export API endpoint `/api/reports/export?target=...&format=...` (M9)
-- [x] Comprehensive test suite (90/90 passing)
+- [x] Generic webhook notifications with HMAC-SHA256 signing (M10)
+- [x] Telegram notifications refactored as webhook provider (M10)
+- [x] Comprehensive test suite (98/98 passing)
 
 ## Future Improvements
 
 - [ ] Scheduled assessments
 - [ ] Integration with SIEM systems
 - [x] Export reports (PDF, JSON, HTML) — completed M9
-- [ ] Webhook notifications
+- [x] Webhook notifications — completed M10
 - [ ] Multi-user authentication
 - [ ] Custom tool marketplace
 - [ ] Plugin system for extensions

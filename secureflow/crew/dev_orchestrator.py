@@ -89,18 +89,33 @@ class DevOrchestrator:
                 summary=summary
             )
 
+            from secureflow.notifications import NotificationDispatcher
+            NotificationDispatcher().dispatch(
+                event="build_complete",
+                target=f"{language}: {task[:100]}",
+                status="success",
+                summary=summary,
+            )
+
             return self._format_final_result(str(result), "success")
 
         except Exception as e:
             self.logger.error(f"Dev crew failed: {str(e)}", exc_info=True)
 
-            # Record failed session in history
             history = SessionHistory()
             history.record(
                 session_type="development",
                 target=f"{language}: {task[:100]}",
                 status="error",
                 summary=f"Error: {str(e)[:500]}"
+            )
+
+            from secureflow.notifications import NotificationDispatcher
+            NotificationDispatcher().dispatch(
+                event="build_failed",
+                target=f"{language}: {task[:100]}",
+                status="error",
+                summary=str(e)[:500],
             )
 
             return self._format_final_result(str(e), "error")

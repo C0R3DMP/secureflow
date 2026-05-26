@@ -78,11 +78,6 @@ async def run_security_crew(target: str) -> dict:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, orchestrator.run_security_crew, target)
 
-        telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-        if telegram_token and telegram_chat_id:
-            orchestrator.send_notification(telegram_token, telegram_chat_id)
-
         _active_scans[scan_id] = {"status": "complete", "target": target}
         return {
             "status": "success" if result.get("success") else "error",
