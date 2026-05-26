@@ -107,13 +107,15 @@ secureflow server
 
 # Server will listen on port 5000 with SSE transport
 # Available endpoints:
-# - GET /ui                      → Web dashboard
-# - GET /stream/{target}         → SSE stream for scan progress
-# - GET /api/history             → Scan history JSON API
-# - POST /tools/run_security_crew → Security assessment
-# - POST /tools/run_dev_crew      → Application development
-# - POST /tools/run_code_review   → Code review analysis
-# - POST /tools/crew_status       → Server health check
+# - GET  /ui                          → Web dashboard
+# - GET  /stream/{target}             → SSE stream for scan progress
+# - GET  /api/history                 → Scan history JSON API
+# - GET  /api/scans/{scan_id}         → Poll active scan status
+# - POST /tools/run_security_crew     → Security assessment (async, returns scan_id)
+# - POST /tools/run_dev_crew          → Application development (async, returns scan_id)
+# - POST /tools/run_code_review       → Code review analysis (async)
+# - POST /tools/run_recon             → Fast recon only (async)
+# - POST /tools/crew_status           → Server health check
 ```
 
 ## Configuration
@@ -367,17 +369,23 @@ pytest tests/test_cli.py::test_cli_version -vv
 - [x] Scan history with CLI command
 - [x] Session recording and persistence
 - [x] Dead code cleanup and optimization
-- [x] Comprehensive test suite (68/68 passing)
+- [x] crewai 1.14.5 upgrade — zero Pydantic warnings (M7)
+- [x] XSS fix in HTML reports (M7)
+- [x] Gemini 2.5-flash model update (M7)
+- [x] Non-blocking async server tools with `scan_id` tracking (M8)
+- [x] Concurrent scan support via `run_in_executor` (M8)
+- [x] Scan status polling endpoint `/api/scans/{scan_id}` (M8)
+- [x] Comprehensive test suite (79/79 passing)
 
 ## Future Improvements
 
 - [ ] Scheduled assessments
 - [ ] Integration with SIEM systems
-- [ ] Custom tool marketplace
-- [ ] Plugin system for extensions
-- [ ] Multi-user authentication
 - [ ] Export reports (PDF, JSON)
 - [ ] Webhook notifications
+- [ ] Multi-user authentication
+- [ ] Custom tool marketplace
+- [ ] Plugin system for extensions
 
 ## Contributing
 
