@@ -61,18 +61,26 @@ def is_gemini_cli_available(timeout: int = 2) -> bool:
 
 
 class LLMProviderStatus:
-    """Track status and quota of LLM providers."""
+    """Track status and quota of LLM providers.
+
+    NOTE: Claude CLI can't be used directly with CrewAI's LLM class,
+    so we prioritize API-compatible providers:
+    1. Gemini API (works with CrewAI/litellm)
+    2. Ollama (free, local, always available)
+    """
 
     PROVIDERS = {
-        "claude-cli": {
-            "type": "cli",
+        "gemini": {
+            "api_key_var": GEMINI_API_KEY,
+            "type": "api",
             "priority": 1,
-            "available": is_claude_cli_available(),
+            "available": bool(GEMINI_API_KEY),
         },
-        "gemini-cli": {
-            "type": "cli",
+        "ollama": {
+            "base_url": OLLAMA_BASE_URL,
+            "type": "local",
             "priority": 2,
-            "available": is_gemini_cli_available(),
+            "available": is_ollama_available(),
         },
         "claude": {
             "api_key_var": ANTHROPIC_API_KEY,
@@ -80,22 +88,10 @@ class LLMProviderStatus:
             "priority": 3,
             "available": bool(ANTHROPIC_API_KEY),
         },
-        "gemini": {
-            "api_key_var": GEMINI_API_KEY,
-            "type": "api",
-            "priority": 4,
-            "available": bool(GEMINI_API_KEY),
-        },
-        "ollama": {
-            "base_url": OLLAMA_BASE_URL,
-            "type": "local",
-            "priority": 5,
-            "available": is_ollama_available(),
-        },
         "opencode": {
             "base_url": OPENCODE_URL,
             "type": "local",
-            "priority": 6,
+            "priority": 4,
             "available": False,  # Check dynamically in check_health
         },
     }
@@ -103,14 +99,10 @@ class LLMProviderStatus:
     @staticmethod
     def check_health(provider: str) -> bool:
         """Check if a provider is healthy and available."""
-        if provider == "claude-cli":
-            return is_claude_cli_available()
-        elif provider == "gemini-cli":
-            return is_gemini_cli_available()
+        if provider == "gemini":
+            return bool(GEMINI_API_KEY) and not _rate_limit_fallback.get("gemini_limited", False)
         elif provider == "claude":
             return bool(ANTHROPIC_API_KEY)
-        elif provider == "gemini":
-            return bool(GEMINI_API_KEY) and not _rate_limit_fallback.get("gemini_limited", False)
         elif provider == "ollama":
             return is_ollama_available()
         elif provider == "opencode":
@@ -131,23 +123,9 @@ class LLMProviderStatus:
                 available.append((provider, info["priority"]))
         return sorted(available, key=lambda x: x[1])
 
-class CLILLMWrapper:
-    """Wrapper to make CLI tools compatible with CrewAI LLM interface."""
-
-    def __init__(self, cli_type: str = "claude", model: str = "claude-opus-4-6"):
-        self.cli_type = cli_type
-        self.model = model
-        self.temperature = 0.7
-        self.max_tokens = 4096
-
-    def call(self, prompt: str, **kwargs) -> str:
-        """Execute CLI command and return response."""
-        if self.cli_type == "claude":
-            return call_claude_cli(prompt, self.model)
-        elif self.cli_type == "gemini":
-            return call_gemini_cli(prompt)
-        else:
-            raise ValueError(f"Unknown CLI type: {self.cli_type}")
+# Note: CLI tools (Claude Code CLI, Gemini CLI) cannot be used directly with CrewAI's LLM class
+# They require subprocess execution outside of the CrewAI framework
+# See call_claude_cli() and call_gemini_cli() below for direct CLI usage if needed
 
 
 def init_llms():
@@ -173,12 +151,11 @@ def init_llms():
     return config
 
 def get_fallback_chain():
-    """Return the LLM fallback order: Claude CLI → Gemini CLI → Gemini API → Ollama."""
+    """Return the LLM fallback order: Gemini API → Ollama → Claude API."""
     return [
-        {"model": "claude-cli", "type": "cli"},
-        {"model": "gemini-cli", "type": "cli"},
         {"model": "gemini/gemini-2.5-flash"},
         {"model": "ollama/qwen2.5-coder", "base_url": OLLAMA_BASE_URL},
+        {"model": "claude/claude-opus-4-6"},
     ]
 
 def call_claude_cli(prompt: str, model: str = "claude-opus-4-6") -> str:
@@ -431,52 +408,20 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperatur
     return LLM(model=model, temperature=temperature)
 
 
-def get_claude_cli_llm(temperature=0.7):
-    """Get Claude CLI wrapper as CrewAI-compatible LLM."""
-    from crewai import LLM
-    # Use litellm with claude model via openai-compatible endpoint if available
-    # For now, return a basic LLM that will fall back
-    if is_claude_cli_available():
-        logger.info("Using Claude CLI as primary provider")
-        try:
-            # Try using litellm's claude model support
-            return LLM(
-                model="claude-opus-4-6",
-                api_key=ANTHROPIC_API_KEY or "dummy",
-                temperature=temperature,
-                provider="claude",
-            )
-        except:
-            # Fallback to wrapper
-            logger.info("Claude API not available, using CLI wrapper")
-            llm = CLILLMWrapper("claude", "claude-opus-4-6")
-            llm.temperature = temperature
-            return llm
-    return None
-
-
-def get_gemini_cli_llm(temperature=0.7):
-    """Get Gemini CLI wrapper as CrewAI-compatible LLM."""
-    from crewai import LLM
-    if is_gemini_cli_available():
-        logger.info("Using Gemini CLI as secondary provider")
-        try:
-            return LLM(
-                model="gemini/gemini-2.5-flash",
-                api_key=GEMINI_API_KEY or "dummy",
-                temperature=temperature,
-            )
-        except:
-            # Fallback to wrapper
-            logger.info("Gemini API not available, using CLI wrapper")
-            llm = CLILLMWrapper("gemini")
-            llm.temperature = temperature
-            return llm
-    return None
+# Note: To use Claude Code CLI or Gemini CLI directly, call:
+#   - call_claude_cli(prompt) for Claude Code CLI
+#   - call_gemini_cli(prompt) for Gemini CLI
+# These functions execute CLI tools via subprocess and are not CrewAI-compatible
 
 
 def get_best_available_llm(temperature=0.7):
-    """Get the best available LLM based on provider priority."""
+    """Get the best available LLM based on provider priority.
+
+    Provider order (CrewAI compatible):
+    1. Gemini API (requires GEMINI_API_KEY)
+    2. Ollama (free, local, no API key needed)
+    3. Claude API (requires ANTHROPIC_API_KEY)
+    """
     from crewai import LLM
 
     available = LLMProviderStatus.get_available_providers()
@@ -485,40 +430,45 @@ def get_best_available_llm(temperature=0.7):
     for provider, priority in available:
         logger.info(f"Trying provider: {provider} (priority: {priority})")
 
-        if provider == "claude-cli":
-            llm = get_claude_cli_llm(temperature)
-            if llm:
-                logger.info(f"Using {provider}")
-                return llm
-        elif provider == "gemini-cli":
-            llm = get_gemini_cli_llm(temperature)
-            if llm:
-                logger.info(f"Using {provider}")
-                return llm
-        elif provider == "claude":
-            if ANTHROPIC_API_KEY:
-                logger.info(f"Using {provider}")
-                return LLM(
-                    model="claude-opus-4-6",
-                    api_key=ANTHROPIC_API_KEY,
-                    temperature=temperature,
-                )
-        elif provider == "gemini":
+        if provider == "gemini":
             if GEMINI_API_KEY:
-                logger.info(f"Using {provider}")
+                logger.info(f"✅ Using Gemini API (primary)")
                 return get_llm_with_rate_limit_fallback(
                     model="gemini/gemini-2.5-flash",
                     temperature=temperature
                 )
         elif provider == "ollama":
-            logger.info(f"Using {provider}")
+            logger.info(f"✅ Using Ollama (fallback)")
             return LLM(
                 model="ollama/qwen2.5-coder:7b",
                 base_url=OLLAMA_BASE_URL,
                 temperature=temperature,
             )
+        elif provider == "claude":
+            if ANTHROPIC_API_KEY:
+                logger.info(f"✅ Using Claude API")
+                return LLM(
+                    model="claude-opus-4-6",
+                    api_key=ANTHROPIC_API_KEY,
+                    temperature=temperature,
+                )
 
-    raise RuntimeError("No LLM providers available! Check config and CLI tools.")
+    # Fallback: always try Ollama if nothing else works
+    try:
+        logger.warning("No API keys available, using Ollama as fallback")
+        return LLM(
+            model="ollama/qwen2.5-coder:7b",
+            base_url=OLLAMA_BASE_URL,
+            temperature=temperature,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"No LLM providers available!\n"
+            f"  Option 1: Set GEMINI_API_KEY for Gemini API (primary)\n"
+            f"  Option 2: Start Ollama: ollama run qwen2.5-coder (free, local)\n"
+            f"  Option 3: Set ANTHROPIC_API_KEY for Claude API\n"
+            f"  Error: {str(e)}"
+        )
 
 
 def completion_with_fallback(messages, model="gemini", temperature=0.7, max_tokens=4096):

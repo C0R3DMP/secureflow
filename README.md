@@ -12,9 +12,9 @@ SecureFlow is a complete AI-powered security assessment and application developm
 ## Features
 
 ### 🔒 Security Assessment Workflow
-- **Recon Agent** (Claude CLI) — Network reconnaissance, port scanning, CVE discovery via nmap
-- **Analyst Agent** (Gemini CLI fallback) — Vulnerability analysis, exploitability assessment, attack chain identification
-- **Reporter Agent** (Gemini/Ollama) — Executive reporting, CVSS scoring, 90-day remediation roadmap
+- **Recon Agent** (Gemini API/Ollama) — Network reconnaissance, port scanning, CVE discovery via nmap
+- **Analyst Agent** (Gemini API/Ollama) — Vulnerability analysis, exploitability assessment, attack chain identification
+- **Reporter Agent** (Gemini API/Ollama) — Executive reporting, CVSS scoring, 90-day remediation roadmap
 
 ### 💻 Development Workflow
 - **Architect Agent** — System design, tech stack selection, project structure planning
@@ -78,11 +78,11 @@ TELEGRAM_CHAT_ID=...              # For Telegram notifications
 
 SecureFlow tries providers in this order (first available is used):
 
-1. **Claude Code CLI** — Fastest, always installed with Claude Code
-2. **Gemini CLI** — Fallback if Claude unavailable
-3. **Claude API** — Requires `ANTHROPIC_API_KEY`
-4. **Gemini API** — Requires `GEMINI_API_KEY`
-5. **Ollama** — Local model, no API key needed
+1. **Gemini API** — Primary (requires `GEMINI_API_KEY`)
+2. **Ollama** — Free fallback (free, local, no API key)
+3. **Claude API** — Alternative (requires `ANTHROPIC_API_KEY`)
+
+**Note:** Claude Code CLI cannot be used directly with CrewAI. For non-CrewAI usage, see `call_claude_cli()` in config.py
 
 ## CLI Commands
 

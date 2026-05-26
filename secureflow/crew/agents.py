@@ -4,32 +4,25 @@ from secureflow.crew.tools import (
     save_findings_to_context, read_context_findings,
     get_all_findings, get_latest_findings
 )
-from secureflow.config import (
-    get_best_available_llm,
-    get_claude_cli_llm,
-    get_gemini_cli_llm,
-    get_llm_with_rate_limit_fallback,
-    is_claude_cli_available,
-    is_gemini_cli_available
-)
+from secureflow.config import get_best_available_llm
 import os
 import logging
 
 logger = logging.getLogger(__name__)
 
-# LLM Configuration with fallback chain: Claude CLI → Gemini CLI → API providers → Ollama
+# LLM Configuration: Gemini API (primary) → Ollama (fallback) → Claude API
 
-def get_primary_llm():
-    """Get best available LLM - Claude CLI first, then others."""
-    return get_best_available_llm(temperature=0.7)
+def get_primary_llm(temperature=0.7):
+    """Get best available LLM - Gemini API preferred, Ollama fallback."""
+    return get_best_available_llm(temperature=temperature)
 
-def get_secondary_llm():
-    """Get secondary LLM for fallback."""
-    return get_best_available_llm(temperature=0.7)
+def get_secondary_llm(temperature=0.7):
+    """Get secondary LLM - same as primary (both agents use best available)."""
+    return get_best_available_llm(temperature=temperature)
 
-def get_reporting_llm():
-    """Get LLM for report generation - prefers Claude then Gemini."""
-    return get_best_available_llm(temperature=0.5)
+def get_reporting_llm(temperature=0.5):
+    """Get LLM for report generation - lower temperature for consistency."""
+    return get_best_available_llm(temperature=temperature)
 
 
 class CrewAgents:
@@ -37,7 +30,7 @@ class CrewAgents:
 
     @staticmethod
     def create_recon_agent():
-        """Fast reconnaissance agent - primary LLM (Claude CLI preferred)."""
+        """Fast reconnaissance agent (Gemini API / Ollama)."""
         return Agent(
             role="Expert Penetration Tester - Reconnaissance",
             goal=(
@@ -60,12 +53,12 @@ class CrewAgents:
             verbose=True,
             max_iter=5,
             allow_delegation=False,
-            llm=get_primary_llm(),
+            llm=get_primary_llm(temperature=0.7),
         )
 
     @staticmethod
     def create_analyst_agent():
-        """Deep analysis agent - secondary LLM (Claude or Gemini)."""
+        """Deep analysis agent (Gemini API / Ollama)."""
         return Agent(
             role="Senior Vulnerability Analyst - Technical Expert",
             goal=(
@@ -91,12 +84,12 @@ class CrewAgents:
             verbose=True,
             max_iter=7,
             allow_delegation=False,
-            llm=get_secondary_llm(),
+            llm=get_secondary_llm(temperature=0.7),
         )
 
     @staticmethod
     def create_reporter_agent():
-        """Reporting agent - professional report writer."""
+        """Reporting agent (Gemini API / Ollama)."""
         return Agent(
             role="Professional Security Report Writer",
             goal=(
@@ -127,7 +120,7 @@ class CrewAgents:
             verbose=True,
             max_iter=4,
             allow_delegation=False,
-            llm=get_reporting_llm(),
+            llm=get_reporting_llm(temperature=0.5),
         )
 
 class DevAgents:
@@ -135,7 +128,7 @@ class DevAgents:
 
     @staticmethod
     def create_architect_agent():
-        """System architecture design agent."""
+        """System architecture design agent (Gemini API / Ollama)."""
         from secureflow.crew.tools import design_system, recommend_stack, plan_structure
 
         return Agent(
@@ -170,12 +163,12 @@ class DevAgents:
             verbose=True,
             max_iter=6,
             allow_delegation=False,
-            llm=get_primary_llm(),
+            llm=get_primary_llm(temperature=0.7),
         )
 
     @staticmethod
     def create_developer_agent():
-        """Code implementation agent."""
+        """Code implementation agent (Gemini API / Ollama)."""
         from secureflow.crew.tools import write_code, create_file, test_code
 
         return Agent(
@@ -210,12 +203,12 @@ class DevAgents:
             verbose=True,
             max_iter=8,
             allow_delegation=False,
-            llm=get_secondary_llm(),
+            llm=get_secondary_llm(temperature=0.7),
         )
 
     @staticmethod
     def create_reviewer_agent():
-        """Code quality review agent."""
+        """Code quality review agent (Gemini API / Ollama)."""
         from secureflow.crew.tools import review_code, suggest_improvements, find_bugs
 
         return Agent(
@@ -251,7 +244,7 @@ class DevAgents:
             verbose=True,
             max_iter=5,
             allow_delegation=False,
-            llm=get_reporting_llm(),
+            llm=get_reporting_llm(temperature=0.5),
         )
 
 
