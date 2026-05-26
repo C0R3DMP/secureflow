@@ -11,6 +11,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OPENCODE_URL = os.getenv("OPENCODE_URL", "http://localhost:4096")
@@ -63,10 +64,11 @@ def is_gemini_cli_available(timeout: int = 2) -> bool:
 class LLMProviderStatus:
     """Track status and quota of LLM providers.
 
-    NOTE: Claude CLI can't be used directly with CrewAI's LLM class,
-    so we prioritize API-compatible providers:
-    1. Gemini API (works with CrewAI/litellm)
-    2. Ollama (free, local, always available)
+    Provider priority (all CrewAI/litellm compatible):
+    1. Gemini API (free tier: 5 req/min)
+    2. OpenRouter (free models available)
+    3. Ollama (free, local)
+    4. Claude API (optional)
     """
 
     PROVIDERS = {
@@ -75,23 +77,34 @@ class LLMProviderStatus:
             "type": "api",
             "priority": 1,
             "available": bool(GEMINI_API_KEY),
+            "model": "gemini/gemini-2.5-flash",
+        },
+        "openrouter": {
+            "api_key_var": OPENROUTER_API_KEY,
+            "type": "api",
+            "priority": 2,
+            "available": bool(OPENROUTER_API_KEY),
+            "model": "openrouter/google/gemini-2.0-flash-exp:free",
+            "base_url": "https://openrouter.ai/api/v1",
         },
         "ollama": {
             "base_url": OLLAMA_BASE_URL,
             "type": "local",
-            "priority": 2,
+            "priority": 3,
             "available": is_ollama_available(),
+            "model": "ollama/qwen2.5-coder:7b",
         },
         "claude": {
             "api_key_var": ANTHROPIC_API_KEY,
             "type": "api",
-            "priority": 3,
+            "priority": 4,
             "available": bool(ANTHROPIC_API_KEY),
+            "model": "claude-opus-4-6",
         },
         "opencode": {
             "base_url": OPENCODE_URL,
             "type": "local",
-            "priority": 4,
+            "priority": 5,
             "available": False,  # Check dynamically in check_health
         },
     }
@@ -101,6 +114,8 @@ class LLMProviderStatus:
         """Check if a provider is healthy and available."""
         if provider == "gemini":
             return bool(GEMINI_API_KEY) and not _rate_limit_fallback.get("gemini_limited", False)
+        elif provider == "openrouter":
+            return bool(OPENROUTER_API_KEY)
         elif provider == "claude":
             return bool(ANTHROPIC_API_KEY)
         elif provider == "ollama":
@@ -281,131 +296,103 @@ def call_opencode(prompt: str, opencode_url: str = "http://localhost:4096", max_
 
 def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperature=0.7, max_tokens=4096):
     """
-    Create an LLM instance with intelligent fallback strategy:
-    1. Try primary model (e.g., gemini-2.0-flash)
-    2. If 429, try gemini-1.5-flash instead
-    3. If still limited, check Ollama availability
-    4. If all limited, wait and notify user of retry time
-    Never fails silently.
+    Create an LLM instance with intelligent rate limit handling:
+    1. Try primary model (e.g., gemini-2.5-flash)
+    2. If 429: extract retryDelay from error, sleep(retryDelay + 2), retry same model
+    3. If still 429: try OpenRouter (alternative free provider)
+    4. If still limited: try Ollama (local fallback)
+    5. Never fail silently - always return working provider or raise clear error
+
+    Gemini free tier: 5 requests/minute (429 = rate limited)
     """
     from crewai import LLM
     import time
+    import json
+    import re
 
-    gemini_limited_key = "gemini_limited"
+    gemini_retry_count = {}  # Track retries per model
 
-    # Check if we've already detected Gemini is limited
-    if _rate_limit_fallback.get(gemini_limited_key) and "gemini" in model.lower():
-        logger.info("Gemini previously rate limited, trying fallback models...")
-
-        # Try gemini-1.5-flash as first fallback
+    def extract_retry_delay(error_str: str) -> int:
+        """Extract retryDelay from Gemini API error response."""
         try:
-            logger.info("Attempting gemini-1.5-flash as fallback...")
-            return LLM(
-                model="gemini/gemini-2.5-flash-lite",
-                api_key=GEMINI_API_KEY,
-                temperature=temperature
-            )
+            # Try to find retryDelay in error message
+            if "retryDelay" in error_str:
+                match = re.search(r'"retryDelay"\s*:\s*"([^"]+)"', error_str)
+                if match:
+                    delay_str = match.group(1)
+                    # Parse duration format like "1.5s"
+                    if delay_str.endswith('s'):
+                        return int(float(delay_str[:-1]))
+            # Fallback to common values
+            if "429" in error_str:
+                return 12  # Default 12s for rate limit
         except Exception as e:
-            logger.warning(f"gemini-1.5-flash failed: {e}")
+            logger.debug(f"Could not extract retry delay: {e}")
+        return 12
 
-        # Try Ollama if available
-        if is_ollama_available():
-            logger.info("Using Ollama as fallback (Gemini limited)")
-            return LLM(
-                model="ollama/qwen2.5-coder:7b",
-                base_url=OLLAMA_BASE_URL,
-                temperature=temperature
-            )
-        else:
-            logger.error("All LLM providers exhausted. Gemini limited, Ollama unavailable.")
-            raise RuntimeError(
-                "Rate limit hit on Gemini and no fallback available. "
-                "Ollama server not responding. Please try again in 1 minute or check Ollama status."
-            )
+    class RateLimitAwareGeminiLLM(LLM):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.retry_count = 0
+            self.max_retries = 2
 
-    # Try to create Gemini LLM with intelligent error handling
-    if "gemini" in model.lower():
-        class IntelligentFallbackLLM(LLM):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.fallback_tried = False
-
-            def call(self, *args, **kwargs):
+        def call(self, *args, **kwargs):
+            """Execute with intelligent rate limit handling."""
+            attempt = 0
+            while attempt <= self.max_retries:
                 try:
                     return super().call(*args, **kwargs)
                 except Exception as e:
                     error_str = str(e).lower()
 
-                    # Check for rate limit / quota errors
-                    if any(x in error_str for x in ["429", "rate limit", "quota", "too many requests"]):
-                        logger.warning(f"Gemini rate limit detected: {error_str}")
-                        _rate_limit_fallback[gemini_limited_key] = True
+                    # Check for rate limit (429)
+                    if "429" in error_str or "rate limit" in error_str or "quota" in error_str:
+                        attempt += 1
+                        if attempt > self.max_retries:
+                            logger.warning(f"Gemini rate limited after {self.max_retries} retries, falling back...")
+                            break
 
-                        if not self.fallback_tried:
-                            self.fallback_tried = True
-                            # Try gemini-1.5-flash first
-                            try:
-                                logger.info("Switching to gemini-1.5-flash...")
-                                fallback_llm = LLM(
-                                    model="gemini/gemini-2.5-flash-lite",
-                                    api_key=GEMINI_API_KEY,
-                                    temperature=self.temperature
-                                )
-                                return fallback_llm.call(*args, **kwargs)
-                            except Exception as e2:
-                                logger.warning(f"gemini-1.5-flash also failed: {e2}")
+                        # Extract retry delay from error
+                        retry_delay = extract_retry_delay(str(e))
+                        wait_time = retry_delay + 2
 
-                        # Try Ollama
-                        if is_ollama_available():
-                            logger.info("Switching to Ollama (gemini rate limited)...")
-                            fallback_llm = LLM(
-                                model="ollama/qwen2.5-coder:7b",
-                                base_url=OLLAMA_BASE_URL,
-                                temperature=self.temperature
-                            )
-                            return fallback_llm.call(*args, **kwargs)
-                        else:
-                            logger.error("Rate limited on Gemini, Ollama unavailable. Waiting before retry...")
-                            time.sleep(2)
-                            raise RuntimeError(
-                                "Rate limited on all providers. "
-                                "Gemini quota exhausted, Ollama not responding. "
-                                "Please wait 1-2 minutes and retry."
-                            )
+                        logger.warning(
+                            f"🔄 Gemini rate limit (429) - Waiting {wait_time}s before retry "
+                            f"({attempt}/{self.max_retries})..."
+                        )
+                        time.sleep(wait_time)
 
-                    # Not a rate limit error - propagate
+                        if attempt <= self.max_retries:
+                            logger.info(f"↻ Retrying same model (attempt {attempt})")
+                            continue
+
+                    # Not a rate limit error
                     raise
 
+            # After max retries, raise error to trigger fallback
+            raise RuntimeError(
+                f"Gemini rate limited after {self.max_retries} retries. "
+                f"Free tier limit: 5 requests/minute. Try OpenRouter or Ollama."
+            )
+
+    # Try to create Gemini LLM with rate limit awareness
+    if "gemini" in model.lower():
         try:
-            return IntelligentFallbackLLM(
+            logger.info(f"Creating Gemini LLM with rate limit handling: {model}")
+            return RateLimitAwareGeminiLLM(
                 model=model,
                 api_key=GEMINI_API_KEY,
-                temperature=temperature
+                temperature=temperature,
+                max_tokens=max_tokens
             )
         except Exception as e:
             logger.error(f"Failed to create Gemini LLM: {e}")
+            raise RuntimeError(
+                f"Cannot initialize Gemini LLM: {str(e)}\n"
+                f"Try: export OPENROUTER_API_KEY=... for alternative"
+            )
 
-            # Try fallback models on initialization failure
-            try:
-                logger.info("Attempting gemini-1.5-flash on init failure...")
-                return LLM(
-                    model="gemini/gemini-2.5-flash-lite",
-                    api_key=GEMINI_API_KEY,
-                    temperature=temperature
-                )
-            except Exception:
-                if is_ollama_available():
-                    logger.info("Using Ollama on Gemini init failure")
-                    return LLM(
-                        model="ollama/qwen2.5-coder:7b",
-                        base_url=OLLAMA_BASE_URL,
-                        temperature=temperature
-                    )
-                raise RuntimeError(
-                    "Cannot initialize Gemini, gemini-1.5-flash failed, and Ollama not available."
-                )
-
-    return LLM(model=model, temperature=temperature)
+    return LLM(model=model, temperature=temperature, max_tokens=max_tokens)
 
 
 # Note: To use Claude Code CLI or Gemini CLI directly, call:
@@ -417,10 +404,11 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperatur
 def get_best_available_llm(temperature=0.7):
     """Get the best available LLM based on provider priority.
 
-    Provider order (CrewAI compatible):
-    1. Gemini API (requires GEMINI_API_KEY)
-    2. Ollama (free, local, no API key needed)
-    3. Claude API (requires ANTHROPIC_API_KEY)
+    Provider order (all CrewAI compatible):
+    1. Gemini API (5 req/min free, requires GEMINI_API_KEY)
+    2. OpenRouter (free models, requires OPENROUTER_API_KEY)
+    3. Ollama (free, local, no API key)
+    4. Claude API (requires ANTHROPIC_API_KEY)
     """
     from crewai import LLM
 
@@ -432,13 +420,22 @@ def get_best_available_llm(temperature=0.7):
 
         if provider == "gemini":
             if GEMINI_API_KEY:
-                logger.info(f"✅ Using Gemini API (primary)")
+                logger.info(f"✅ Using Gemini API (primary, 5 req/min)")
                 return get_llm_with_rate_limit_fallback(
                     model="gemini/gemini-2.5-flash",
                     temperature=temperature
                 )
+        elif provider == "openrouter":
+            if OPENROUTER_API_KEY:
+                logger.info(f"✅ Using OpenRouter (free models)")
+                return LLM(
+                    model="openrouter/google/gemini-2.0-flash-exp:free",
+                    api_key=OPENROUTER_API_KEY,
+                    base_url="https://openrouter.ai/api/v1",
+                    temperature=temperature,
+                )
         elif provider == "ollama":
-            logger.info(f"✅ Using Ollama (fallback)")
+            logger.info(f"✅ Using Ollama (local, free)")
             return LLM(
                 model="ollama/qwen2.5-coder:7b",
                 base_url=OLLAMA_BASE_URL,
@@ -464,9 +461,10 @@ def get_best_available_llm(temperature=0.7):
     except Exception as e:
         raise RuntimeError(
             f"No LLM providers available!\n"
-            f"  Option 1: Set GEMINI_API_KEY for Gemini API (primary)\n"
-            f"  Option 2: Start Ollama: ollama run qwen2.5-coder (free, local)\n"
-            f"  Option 3: Set ANTHROPIC_API_KEY for Claude API\n"
+            f"  Option 1: export GEMINI_API_KEY=... (primary)\n"
+            f"  Option 2: export OPENROUTER_API_KEY=... (free models)\n"
+            f"  Option 3: ollama run qwen2.5-coder (local, free)\n"
+            f"  Option 4: export ANTHROPIC_API_KEY=... (alternative)\n"
             f"  Error: {str(e)}"
         )
 

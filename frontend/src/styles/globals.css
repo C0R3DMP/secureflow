@@ -3,25 +3,32 @@
 @tailwind utilities;
 
 :root {
-  --background: 12 25% 3%;
-  --foreground: 0 0% 97%;
-  --card: 220 20% 12%;
-  --card-foreground: 0 0% 97%;
-  --primary: 260 84% 58%;
-  --primary-foreground: 220 40% 3.9%;
-  --secondary: 200 92% 54%;
-  --secondary-foreground: 220 40% 98%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 220 40% 98%;
-  --success: 142 71% 45%;
-  --success-foreground: 220 40% 3.9%;
-  --muted: 220 16% 40%;
-  --muted-foreground: 220 9% 65%;
-  --accent: 180 80% 55%;
-  --accent-foreground: 220 40% 3.9%;
-  --border: 220 25% 22%;
-  --input: 220 25% 22%;
-  --ring: 260 84% 58%;
+  /* Cyberpunk Colors */
+  --background: 0 0% 4%;                    /* #0a0a0a */
+  --foreground: 0 0% 100%;                  /* #ffffff */
+  --card: 0 0% 8%;                          /* #141414 */
+  --card-foreground: 0 0% 100%;
+  --primary: 180 100% 50%;                  /* #00ffff (Cyan) */
+  --primary-foreground: 0 0% 4%;
+  --secondary: 289 100% 50%;                /* #bf00ff (Purple) */
+  --secondary-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;                 /* Red */
+  --destructive-foreground: 0 0% 100%;
+  --success: 110 100% 25%;                  /* #00ff41 (Neon Green) */
+  --success-foreground: 0 0% 4%;
+  --muted: 0 0% 30%;
+  --muted-foreground: 0 0% 60%;
+  --accent: 180 100% 50%;                   /* Cyan */
+  --accent-foreground: 0 0% 4%;
+  --border: 0 0% 15%;
+  --input: 0 0% 12%;
+  --ring: 180 100% 50%;                     /* Cyan glow */
+
+  /* Cyberpunk Neon Colors */
+  --neon-cyan: #00ffff;
+  --neon-purple: #bf00ff;
+  --neon-green: #00ff41;
+  --neon-pink: #ff0080;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.4);
@@ -40,10 +47,8 @@
 
   body {
     @apply bg-background text-foreground;
-    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(220 25% 8%) 100%);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-      sans-serif;
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 100%);
+    font-family: 'Courier New', 'Monaco', monospace;
     position: relative;
     overflow-x: hidden;
   }
@@ -57,12 +62,12 @@
     height: 100%;
     background: radial-gradient(
       600px at 20% 20%,
-      rgba(102, 126, 234, 0.08) 0%,
+      rgba(0, 255, 255, 0.08) 0%,
       transparent 80%
     ),
     radial-gradient(
       600px at 80% 80%,
-      rgba(118, 75, 162, 0.08) 0%,
+      rgba(191, 0, 255, 0.08) 0%,
       transparent 80%
     );
     pointer-events: none;
@@ -122,19 +127,23 @@
   }
 
   .glow-primary {
-    box-shadow: 0 0 20px rgba(102, 126, 234, 0.3), 0 0 40px rgba(102, 126, 234, 0.15);
+    /* Cyan glow */
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.5), 0 0 40px rgba(0, 255, 255, 0.25), inset 0 0 20px rgba(0, 255, 255, 0.1);
   }
 
   .glow-accent {
-    box-shadow: 0 0 20px rgba(118, 75, 162, 0.3), 0 0 40px rgba(118, 75, 162, 0.15);
+    /* Purple glow */
+    box-shadow: 0 0 20px rgba(191, 0, 255, 0.5), 0 0 40px rgba(191, 0, 255, 0.25), inset 0 0 20px rgba(191, 0, 255, 0.1);
   }
 
   .glow-success {
-    box-shadow: 0 0 20px rgba(76, 175, 80, 0.3), 0 0 40px rgba(76, 175, 80, 0.15);
+    /* Neon green glow */
+    box-shadow: 0 0 20px rgba(0, 255, 65, 0.5), 0 0 40px rgba(0, 255, 65, 0.25), inset 0 0 20px rgba(0, 255, 65, 0.1);
   }
 
   .glow-danger {
-    box-shadow: 0 0 20px rgba(239, 83, 80, 0.3), 0 0 40px rgba(239, 83, 80, 0.15);
+    /* Pink/Red glow */
+    box-shadow: 0 0 20px rgba(255, 0, 128, 0.5), 0 0 40px rgba(255, 0, 128, 0.25), inset 0 0 20px rgba(255, 0, 128, 0.1);
   }
 
   .border-glow {
@@ -149,48 +158,50 @@
   }
 
   .input-glass {
-    background: rgba(20, 30, 48, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(10, 10, 10, 0.8);
+    border: 2px solid rgba(0, 255, 255, 0.2);
     border-radius: 0.5rem;
     padding: 0.5rem 1rem;
-    color: hsl(var(--foreground));
+    color: var(--neon-cyan);
     transition: all 0.3s ease;
     backdrop-filter: blur(8px);
+    font-family: 'Courier New', monospace;
   }
 
   .input-glass::placeholder {
-    color: hsl(var(--muted-foreground));
+    color: rgba(0, 255, 255, 0.3);
   }
 
   .input-glass:focus {
     outline: none;
-    border-color: hsl(var(--primary));
-    box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.1);
   }
 
   .btn-glass {
     @apply px-4 py-2 rounded-lg font-semibold transition-all duration-300;
-    background: rgba(hsl(var(--primary)), 0.1);
-    border: 1px solid rgba(hsl(var(--primary)), 0.3);
-    color: hsl(var(--foreground));
+    background: rgba(0, 255, 255, 0.05);
+    border: 2px solid rgba(0, 255, 255, 0.3);
+    color: var(--neon-cyan);
   }
 
   .btn-glass:hover {
-    background: rgba(hsl(var(--primary)), 0.2);
-    border: 1px solid rgba(hsl(var(--primary)), 0.5);
-    box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+    background: rgba(0, 255, 255, 0.1);
+    border: 2px solid rgba(0, 255, 255, 0.6);
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
   }
 
   .btn-primary {
     @apply px-4 py-2 rounded-lg font-semibold transition-all duration-300;
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
-    color: white;
-    box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+    background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+    color: #0a0a0a;
+    font-weight: bold;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.1);
   }
 
   .btn-primary:hover {
     transform: translateY(-2px);
-    box-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.8), 0 0 60px rgba(191, 0, 255, 0.5);
   }
 
   .btn-primary:active {
@@ -269,13 +280,13 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
   border-radius: 4px;
-  box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  box-shadow: 0 0 15px rgba(102, 126, 234, 0.5);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.8), 0 0 30px rgba(191, 0, 255, 0.4);
 }
 
 /* Responsive utilities */

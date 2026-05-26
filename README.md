@@ -78,11 +78,12 @@ TELEGRAM_CHAT_ID=...              # For Telegram notifications
 
 SecureFlow tries providers in this order (first available is used):
 
-1. **Gemini API** — Primary (requires `GEMINI_API_KEY`)
-2. **Ollama** — Free fallback (free, local, no API key)
-3. **Claude API** — Alternative (requires `ANTHROPIC_API_KEY`)
+1. **Gemini API** (5 req/min) — Requires `GEMINI_API_KEY`
+2. **OpenRouter** (free models) — Requires `OPENROUTER_API_KEY` — Recommended for high volume
+3. **Ollama** (local, free) — Requires running `ollama run qwen2.5-coder`
+4. **Claude API** — Requires `ANTHROPIC_API_KEY`
 
-**Note:** Claude Code CLI cannot be used directly with CrewAI. For non-CrewAI usage, see `call_claude_cli()` in config.py
+**Recommendation:** Use OpenRouter for free models with no rate limits on free tier
 
 ## CLI Commands
 
