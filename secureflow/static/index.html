@@ -3,1138 +3,214 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecureFlow AI — Professional Security Assessment</title>
+    <title>SecureFlow AI - Setup Required</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        :root {
-            /* Terminal-inspired dark colors */
-            --bg-primary: #0a0e27;
-            --bg-secondary: #12172a;
-            --bg-tertiary: #1a2045;
-            --text-primary: #e8f0ff;
-            --text-secondary: #8b95c9;
-            --text-muted: #5a6487;
-            --border: #2a3555;
-            --accent-blue: #4da6ff;
-            --accent-green: #2aca5c;
-            --accent-yellow: #ffb84d;
-            --accent-red: #ff5454;
-            --accent-orange: #ff8a3d;
-            --accent-purple: #b77dff;
-
-            /* Shadows for depth */
-            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
         body {
-            font-family: 'SF Mono', 'Roboto Mono', 'Monaco', monospace;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #12172a 100%);
+            color: #e8f0ff;
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
-            line-height: 1.6;
-            letter-spacing: 0.5px;
         }
 
-        /* Main layout */
         .container {
-            max-width: 1600px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: 1fr 350px;
-            gap: 20px;
-            min-height: 100vh;
-        }
-
-        header {
-            grid-column: 1 / -1;
-            padding: 30px 0 20px;
-            border-bottom: 2px solid var(--accent-blue);
-            margin-bottom: 20px;
+            max-width: 600px;
+            width: 100%;
+            background: rgba(18, 23, 42, 0.8);
+            border: 1px solid rgba(77, 166, 255, 0.3);
+            border-radius: 12px;
+            padding: 40px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
         }
 
         h1 {
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            background: linear-gradient(90deg, #4da6ff, #2aca5c);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            letter-spacing: 1px;
+            margin-bottom: 10px;
+            font-size: 28px;
         }
 
-        .header-subtitle {
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 500;
+        .subtitle {
+            color: #8b95c9;
+            margin-bottom: 30px;
+            font-size: 14px;
         }
 
-        .panel {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: var(--shadow-md);
-            transition: border-color 0.3s, box-shadow 0.3s;
+        .section {
+            margin-bottom: 30px;
         }
 
-        .panel:hover {
-            border-color: var(--accent-blue);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .panel h2 {
-            font-size: 12px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: var(--accent-blue);
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 12px;
-        }
-
-        .panel h3 {
-            font-size: 13px;
+        .section h2 {
+            color: #4da6ff;
+            font-size: 14px;
             font-weight: 600;
-            margin: 16px 0 12px;
-            color: var(--text-primary);
             text-transform: uppercase;
             letter-spacing: 1px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(77, 166, 255, 0.2);
+            padding-bottom: 10px;
         }
 
-        /* Progress phases */
-        .phases {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 20px;
+        .section p {
+            color: #c9d1e8;
+            line-height: 1.8;
+            margin-bottom: 10px;
+            font-size: 14px;
         }
 
-        .phase {
-            padding: 16px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .phase:hover {
-            border-color: var(--accent-blue);
-            background: var(--bg-primary);
-        }
-
-        .phase.active {
-            border-color: var(--accent-yellow);
-            background: rgba(255, 180, 77, 0.05);
-        }
-
-        .phase.completed {
-            border-color: var(--accent-green);
-            background: rgba(46, 202, 92, 0.05);
-        }
-
-        .phase-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex: 1;
-        }
-
-        .phase-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            font-weight: 700;
-            background: var(--bg-secondary);
-            border: 2px solid var(--text-secondary);
-            transition: all 0.3s;
-        }
-
-        .phase.completed .phase-icon {
-            background: var(--accent-green);
-            border-color: var(--accent-green);
-            color: var(--bg-primary);
-        }
-
-        .phase.active .phase-icon {
-            background: var(--accent-yellow);
-            border-color: var(--accent-yellow);
-            color: var(--bg-primary);
-            box-shadow: 0 0 12px rgba(255, 180, 77, 0.3);
-        }
-
-        .phase-name {
-            flex: 1;
-        }
-
-        .phase-name strong {
+        code {
             display: block;
-            font-size: 13px;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-        }
-
-        .phase-status {
-            font-size: 11px;
-            color: var(--text-secondary);
-        }
-
-        .phase-timer {
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--accent-yellow);
-            min-width: 50px;
-            text-align: right;
-        }
-
-        /* Agent messages/logs */
-        .agent-messages {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            max-height: 600px;
-            overflow-y: auto;
-            padding: 12px;
-            background: var(--bg-tertiary);
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            margin: 16px 0;
-        }
-
-        .agent-message {
-            padding: 12px;
-            background: var(--bg-secondary);
-            border-left: 3px solid var(--accent-blue);
-            border-radius: 4px;
-            font-size: 12px;
-            line-height: 1.5;
-        }
-
-        .agent-message.recon {
-            border-left-color: var(--accent-blue);
-        }
-
-        .agent-message.analyst {
-            border-left-color: var(--accent-purple);
-        }
-
-        .agent-message.reporter {
-            border-left-color: var(--accent-green);
-        }
-
-        .agent-message.system {
-            border-left-color: var(--accent-yellow);
-        }
-
-        .agent-label {
-            font-weight: 700;
-            color: var(--accent-blue);
-            font-size: 11px;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .agent-message.analyst .agent-label { color: var(--accent-purple); }
-        .agent-message.reporter .agent-label { color: var(--accent-green); }
-        .agent-message.system .agent-label { color: var(--accent-yellow); }
-
-        /* Logs panel */
-        .logs-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            max-height: 400px;
-            overflow-y: auto;
-            padding: 12px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 11px;
-            font-family: 'SF Mono', monospace;
-        }
-
-        .log-entry {
-            padding: 6px 8px;
-            border-radius: 4px;
-            display: flex;
-            gap: 8px;
-            align-items: flex-start;
-        }
-
-        .log-timestamp {
-            color: var(--text-muted);
-            min-width: 110px;
-            font-weight: 600;
-        }
-
-        .log-level {
-            min-width: 55px;
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 10px;
-        }
-
-        .log-message {
-            flex: 1;
-            color: var(--text-secondary);
-        }
-
-        .log-entry.info {
-            background: rgba(77, 166, 255, 0.05);
-        }
-
-        .log-entry.info .log-level {
-            color: var(--accent-blue);
-        }
-
-        .log-entry.warning {
-            background: rgba(255, 180, 77, 0.05);
-        }
-
-        .log-entry.warning .log-level {
-            color: var(--accent-yellow);
-        }
-
-        .log-entry.error {
-            background: rgba(255, 84, 84, 0.05);
-        }
-
-        .log-entry.error .log-level {
-            color: var(--accent-red);
-        }
-
-        .log-entry.success {
-            background: rgba(46, 202, 92, 0.05);
-        }
-
-        .log-entry.success .log-level {
-            color: var(--accent-green);
-        }
-
-        /* Action buttons */
-        .actions {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-top: 20px;
-        }
-
-        button {
-            padding: 12px 16px;
-            background: var(--accent-blue);
-            border: none;
-            border-radius: 8px;
-            color: var(--bg-primary);
-            font-size: 12px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-family: inherit;
-        }
-
-        button:hover {
-            background: var(--accent-green);
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .btn-secondary {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-
-        .btn-secondary:hover {
-            background: var(--border);
-            border-color: var(--accent-blue);
-        }
-
-        .btn-danger {
-            background: var(--accent-red);
-            color: var(--bg-primary);
-        }
-
-        .btn-danger:hover {
-            background: #ff3636;
-        }
-
-        /* Status indicator */
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-            font-size: 12px;
-        }
-
-        .indicator-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        .indicator-dot.idle {
-            background: var(--text-secondary);
-            animation: none;
-        }
-
-        .indicator-dot.running {
-            background: var(--accent-green);
-        }
-
-        .indicator-dot.error {
-            background: var(--accent-red);
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Provider status */
-        .provider-status {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 8px;
-            margin: 12px 0;
-        }
-
-        .provider {
-            padding: 10px 12px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 12px;
-        }
-
-        .provider-name {
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .provider-badge {
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
-
-        .provider-badge.available {
-            background: rgba(46, 202, 92, 0.2);
-            color: var(--accent-green);
-        }
-
-        .provider-badge.limited {
-            background: rgba(255, 180, 77, 0.2);
-            color: var(--accent-yellow);
-        }
-
-        .provider-badge.unavailable {
-            background: rgba(255, 84, 84, 0.2);
-            color: var(--accent-red);
-        }
-
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: var(--bg-tertiary);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--border);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--accent-blue);
-        }
-
-        /* History panel */
-        .history-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .history-item {
-            padding: 10px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .history-item:hover {
-            border-color: var(--accent-blue);
-            background: var(--bg-secondary);
-        }
-
-        .history-item-target {
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-        }
-
-        .history-item-time {
-            color: var(--text-muted);
-            font-size: 10px;
-        }
-
-        .history-item-status {
-            display: inline-block;
-            margin-top: 4px;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: 600;
-        }
-
-        .history-item-status.success {
-            background: rgba(46, 202, 92, 0.2);
-            color: var(--accent-green);
-        }
-
-        .history-item-status.error {
-            background: rgba(255, 84, 84, 0.2);
-            color: var(--accent-red);
-        }
-
-        /* Responsive */
-        @media (max-width: 1200px) {
-            .container {
-                grid-template-columns: 1fr;
-            }
-
-            header {
-                grid-column: 1;
-            }
-
-            .panel {
-                grid-column: 1;
-            }
-        }
-
-        /* Loading spinner */
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid var(--border);
-            border-top: 2px solid var(--accent-blue);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        /* Modal styles */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
             background: rgba(10, 14, 39, 0.8);
-            backdrop-filter: blur(4px);
-        }
-
-        .modal.active {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal-content {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 500px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: var(--shadow-lg);
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .modal-header h2 {
-            margin: 0;
-            color: var(--accent-blue);
-            font-size: 18px;
-        }
-
-        .modal-close {
-            background: none;
-            border: none;
-            color: var(--text-secondary);
-            font-size: 24px;
-            cursor: pointer;
-            padding: 0;
-            margin: 0;
-        }
-
-        .modal-close:hover {
-            color: var(--text-primary);
-        }
-
-        .settings-group {
-            margin-bottom: 24px;
-        }
-
-        .settings-group h3 {
-            color: var(--accent-blue);
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 12px;
-        }
-
-        .provider-config {
-            padding: 12px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
+            border: 1px solid rgba(77, 166, 255, 0.2);
             border-radius: 6px;
-            margin-bottom: 12px;
+            padding: 12px;
+            margin: 10px 0;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            color: #ff8a3d;
         }
 
-        .provider-config h4 {
-            color: var(--text-primary);
+        .success-status {
+            display: none;
+        }
+
+        .info-status {
+            padding: 15px;
+            background: rgba(77, 166, 255, 0.1);
+            border: 1px solid rgba(77, 166, 255, 0.3);
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .info-status p {
+            margin: 0;
+            color: #8b95c9;
             font-size: 13px;
-            margin-bottom: 8px;
         }
 
-        .provider-config-row {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 8px;
+        .emoji {
+            font-size: 24px;
+            margin-right: 10px;
         }
 
-        .provider-config input {
-            flex: 1;
+        a {
+            color: #4da6ff;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(77, 166, 255, 0.3);
         }
 
-        .btn-test {
-            padding: 8px 12px;
-            background: var(--accent-purple);
-            border: none;
-            border-radius: 4px;
-            color: var(--bg-primary);
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            text-transform: uppercase;
+        a:hover {
+            border-bottom-color: #4da6ff;
         }
 
-        .btn-test:hover {
-            background: var(--accent-blue);
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(77, 166, 255, 0.1);
+            text-align: center;
+            color: #5a6487;
+            font-size: 12px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <header>
-            <h1>SecureFlow AI</h1>
-            <p class="header-subtitle">Professional Distributed Security Assessment Engine</p>
-        </header>
+        <h1>🔒 SecureFlow AI</h1>
+        <p class="subtitle">Professional Distributed Security Assessment Engine</p>
 
-        <!-- Main content: Agent messages and logs -->
-        <div class="panel" style="grid-column: 1;">
-            <h2>Security Scan - Real-Time Agent Collaboration</h2>
-
-            <div class="phase h3">Progress Phases</div>
-            <div class="phases" id="phases-container">
-                <div class="phase" id="phase-recon">
-                    <div class="phase-info">
-                        <div class="phase-icon">1</div>
-                        <div class="phase-name">
-                            <strong>Reconnaissance</strong>
-                            <span class="phase-status" id="recon-status">Pending</span>
-                        </div>
-                    </div>
-                    <div class="phase-timer" id="recon-timer">00:00</div>
-                </div>
-                <div class="phase" id="phase-analysis">
-                    <div class="phase-info">
-                        <div class="phase-icon">2</div>
-                        <div class="phase-name">
-                            <strong>Vulnerability Analysis</strong>
-                            <span class="phase-status" id="analysis-status">Pending</span>
-                        </div>
-                    </div>
-                    <div class="phase-timer" id="analysis-timer">00:00</div>
-                </div>
-                <div class="phase" id="phase-reporting">
-                    <div class="phase-info">
-                        <div class="phase-icon">3</div>
-                        <div class="phase-name">
-                            <strong>Report Generation</strong>
-                            <span class="phase-status" id="reporting-status">Pending</span>
-                        </div>
-                    </div>
-                    <div class="phase-timer" id="reporting-timer">00:00</div>
-                </div>
-            </div>
-
-            <h3>Agent Messages</h3>
-            <div class="agent-messages" id="messages-container">
-                <div class="agent-message system">
-                    <div class="agent-label">System</div>
-                    <div>Ready for security assessment. Enter target and click "Start Scan".</div>
-                </div>
-            </div>
-
-            <h3>Logs</h3>
-            <div class="logs-panel" id="logs-container">
-                <div class="log-entry info">
-                    <span class="log-timestamp">[00:00:00]</span>
-                    <span class="log-level">INFO</span>
-                    <span class="log-message">Dashboard initialized</span>
-                </div>
-            </div>
+        <div class="info-status">
+            <p>✅ <strong>React Frontend:</strong> To use the modern React dashboard, build the frontend first.</p>
         </div>
 
-        <!-- Right sidebar: Controls and history -->
-        <div class="panel" style="grid-column: 2; grid-row: 2;">
-            <h2>Controls</h2>
+        <div class="section">
+            <h2><span class="emoji">📦</span>Setup Instructions</h2>
+            <p>The React frontend needs to be built before the dashboard is available. Run these commands:</p>
 
-            <div class="form-group">
-                <label for="target-input">Target</label>
-                <input type="text" id="target-input" placeholder="IP, hostname, or URL" value="localhost">
-            </div>
+            <code>cd frontend && npm install && npm run build</code>
 
-            <div class="status-indicator" id="status-indicator">
-                <div class="indicator-dot idle"></div>
-                <span>Idle</span>
-            </div>
+            <p>Or use the setup script:</p>
 
-            <div class="actions">
-                <button id="btn-scan" onclick="startScan()">
-                    <span>▶ Start Scan</span>
-                </button>
-                <button class="btn-secondary" id="btn-download" disabled onclick="downloadReport()">
-                    <span>⬇ Download Report</span>
-                </button>
-                <button class="btn-secondary" onclick="openSettings()">
-                    <span>⚙️ Settings</span>
-                </button>
-                <button class="btn-danger" onclick="clearLogs()" style="margin-top: 8px;">
-                    <span>🗑 Clear Logs</span>
-                </button>
-            </div>
-
-            <h3 style="margin-top: 24px;">Provider Status</h3>
-            <div class="provider-status" id="provider-status">
-                <div class="provider">
-                    <span class="provider-name">Claude</span>
-                    <span class="provider-badge unavailable">N/A</span>
-                </div>
-                <div class="provider">
-                    <span class="provider-name">Gemini</span>
-                    <span class="provider-badge available">Ready</span>
-                </div>
-                <div class="provider">
-                    <span class="provider-name">Ollama</span>
-                    <span class="provider-badge available">Local</span>
-                </div>
-            </div>
-
-            <h3 style="margin-top: 24px;">Scan History</h3>
-            <div class="history-list" id="history-container">
-                <div style="color: var(--text-muted); font-size: 11px;">No scans yet</div>
-            </div>
+            <code>bash setup-frontend.sh</code>
         </div>
-    </div>
 
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>⚙️ Provider Settings</h2>
-                <button class="modal-close" onclick="closeSettings()">&times;</button>
-            </div>
+        <div class="section">
+            <h2><span class="emoji">🚀</span>Quick Start</h2>
+            <p>Once the frontend is built:</p>
 
-            <div class="settings-group">
-                <h3>LLM Providers</h3>
-                <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
-                    Configure and test your LLM providers. Priority order: Claude > Gemini > Ollama
-                </p>
+            <code>python -m secureflow server-launch</code>
 
-                <!-- Claude Provider -->
-                <div class="provider-config">
-                    <h4>🤖 Claude (Anthropic)</h4>
-                    <div class="provider-config-row">
-                        <input type="password" id="claude-key" placeholder="ANTHROPIC_API_KEY" style="flex: 1;">
-                        <button class="btn-test" onclick="testProvider('claude')">Test</button>
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-muted);">
-                        Status: <span id="claude-status">Not configured</span>
-                    </div>
-                </div>
+            <p>Then open your browser to:</p>
 
-                <!-- Gemini Provider -->
-                <div class="provider-config">
-                    <h4>✨ Gemini (Google)</h4>
-                    <div class="provider-config-row">
-                        <input type="password" id="gemini-key" placeholder="GEMINI_API_KEY" style="flex: 1;">
-                        <button class="btn-test" onclick="testProvider('gemini')">Test</button>
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-muted);">
-                        Status: <span id="gemini-status">Not configured</span>
-                    </div>
-                </div>
+            <code>http://localhost:5000/ui</code>
+        </div>
 
-                <!-- Ollama Provider -->
-                <div class="provider-config">
-                    <h4>🦙 Ollama (Local)</h4>
-                    <div class="provider-config-row">
-                        <input type="text" id="ollama-url" placeholder="http://localhost:11434" style="flex: 1;">
-                        <button class="btn-test" onclick="testProvider('ollama')">Test</button>
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-muted);">
-                        Status: <span id="ollama-status">Checking...</span>
-                    </div>
-                </div>
-            </div>
+        <div class="section">
+            <h2><span class="emoji">📚</span>Documentation</h2>
+            <p>For more information, see:</p>
+            <ul style="list-style: none; padding: 0; margin: 10px 0;">
+                <li>📖 <a href="frontend/README.md">Frontend Documentation</a></li>
+                <li>📊 <a href="PROJECT_MAP.md">Project Architecture</a></li>
+            </ul>
+        </div>
 
-            <div class="settings-group">
-                <h3>Provider Priority</h3>
-                <div style="font-size: 12px; color: var(--text-secondary);">
-                    <div style="margin: 8px 0;">1️⃣ Claude (Professional, most capable)</div>
-                    <div style="margin: 8px 0;">2️⃣ Gemini (Fast, free tier)</div>
-                    <div style="margin: 8px 0;">3️⃣ Ollama (Local, privacy-focused)</div>
-                </div>
-            </div>
+        <div class="section">
+            <h2><span class="emoji">🔧</span>Development Mode</h2>
+            <p>For development with live reload:</p>
 
-            <div style="display: flex; gap: 8px; margin-top: 24px;">
-                <button class="btn-secondary" onclick="saveSettings()" style="flex: 1;">💾 Save Settings</button>
-                <button class="btn-danger" onclick="closeSettings()">Close</button>
-            </div>
+            <code>cd frontend && npm run dev</code>
+
+            <p>This starts Vite dev server on <code>http://localhost:3000</code> with proxy to backend.</p>
+        </div>
+
+        <div class="section">
+            <h2><span class="emoji">✨</span>Features</h2>
+            <ul style="list-style: none; padding: 0; margin: 10px 0; font-size: 14px;">
+                <li>✅ Real-time SSE agent collaboration display</li>
+                <li>✅ Live log streaming with color-coded severity</li>
+                <li>✅ Animated phase progress with timers</li>
+                <li>✅ LLM provider health status indicators</li>
+                <li>✅ Professional dark theme</li>
+                <li>✅ Settings and history modals</li>
+                <li>✅ Report download</li>
+                <li>✅ Fully typed TypeScript</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            <p>SecureFlow AI © 2026 | Built with React + TypeScript + Tailwind CSS</p>
         </div>
     </div>
 
     <script>
-        const state = {
-            isScanning: false,
-            currentTarget: '',
-            currentPhase: null,
-            phaseStartTimes: {},
-            messageLog: [],
-            logs: [],
-            report: null,
-        };
-
-        function log(level, message) {
-            const timestamp = new Date().toLocaleTimeString();
-            const entry = { timestamp, level, message };
-            state.logs.push(entry);
-
-            const logsContainer = document.getElementById('logs-container');
-            const logEl = document.createElement('div');
-            logEl.className = `log-entry ${level}`;
-            logEl.innerHTML = `
-                <span class="log-timestamp">[${timestamp}]</span>
-                <span class="log-level">${level}</span>
-                <span class="log-message">${message}</span>
-            `;
-            logsContainer.appendChild(logEl);
-            logsContainer.scrollTop = logsContainer.scrollHeight;
-        }
-
-        function addMessage(agent, message) {
-            const msgContainer = document.getElementById('messages-container');
-            if (msgContainer.children.length === 1 && msgContainer.querySelector('.system')) {
-                msgContainer.innerHTML = '';
-            }
-
-            const messageEl = document.createElement('div');
-            const agentClass = agent.toLowerCase().replace(' ', '-');
-            messageEl.className = `agent-message ${agentClass}`;
-            messageEl.innerHTML = `
-                <div class="agent-label">${agent}</div>
-                <div>${message}</div>
-            `;
-            msgContainer.appendChild(messageEl);
-            msgContainer.scrollTop = msgContainer.scrollHeight;
-        }
-
-        function setPhaseStatus(phase, status) {
-            const phaseEl = document.getElementById(`phase-${phase}`);
-            const statusEl = document.getElementById(`${phase}-status`);
-
-            phaseEl.classList.remove('active', 'completed');
-            if (status === 'active') {
-                phaseEl.classList.add('active');
-                state.phaseStartTimes[phase] = Date.now();
-                statusEl.textContent = 'Running...';
-            } else if (status === 'completed') {
-                phaseEl.classList.add('completed');
-                statusEl.textContent = 'Complete ✓';
-            } else {
-                statusEl.textContent = 'Pending';
-            }
-        }
-
-        function updateTimer(phase) {
-            if (state.phaseStartTimes[phase]) {
-                const elapsed = Math.floor((Date.now() - state.phaseStartTimes[phase]) / 1000);
-                const mins = Math.floor(elapsed / 60);
-                const secs = elapsed % 60;
-                const timer = document.getElementById(`${phase}-timer`);
-                timer.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-            }
-        }
-
-        function startScan() {
-            const target = document.getElementById('target-input').value;
-            if (!target) {
-                log('warning', 'Please enter a target');
-                return;
-            }
-
-            state.isScanning = true;
-            state.currentTarget = target;
-            state.messageLog = [];
-
-            document.getElementById('btn-scan').disabled = true;
-            const indicator = document.getElementById('status-indicator');
-            indicator.innerHTML = '<div class="indicator-dot running"></div><span>Scanning...</span>';
-
-            log('info', `Starting scan on target: ${target}`);
-            addMessage('System', `Initializing collaborative security assessment for ${target}`);
-
-            // Clear phase statuses
-            ['recon', 'analysis', 'reporting'].forEach(p => {
-                setPhaseStatus(p, 'pending');
-            });
-
-            // Connect to SSE stream
-            startSSEStream(target);
-        }
-
-        function startSSEStream(target) {
-            const eventSource = new EventSource(`/stream/${target}`);
-
-            eventSource.addEventListener('message', (event) => {
-                const data = JSON.parse(event.data);
-                handleStreamEvent(data);
-            });
-
-            eventSource.addEventListener('error', () => {
-                eventSource.close();
-                log('error', 'Connection to server lost');
-                finishScan();
-            });
-        }
-
-        function handleStreamEvent(data) {
-            if (data.event === 'start') {
-                log('info', `Scan started: ${data.target}`);
-            } else if (data.event === 'phase_complete') {
-                const phaseName = data.phase.toLowerCase().replace(' ', '_');
-                setPhaseStatus(phaseName.split('_')[0], 'completed');
-                addMessage('System', `✓ ${data.phase} complete (${data.n}/${data.total})`);
-                log('success', `Phase ${data.n}/${data.total}: ${data.phase} completed`);
-            } else if (data.event === 'complete') {
-                log('success', 'Security assessment complete');
-                addMessage('System', 'Assessment complete! Report is ready for download.');
-                state.report = data.result;
-                finishScan();
-            }
-
-            // Update timers
-            ['recon', 'analysis', 'reporting'].forEach(updateTimer);
-        }
-
-        function finishScan() {
-            state.isScanning = false;
-            document.getElementById('btn-scan').disabled = false;
-            document.getElementById('btn-download').disabled = false;
-
-            const indicator = document.getElementById('status-indicator');
-            indicator.innerHTML = '<div class="indicator-dot idle"></div><span>Complete</span>';
-
-            loadHistory();
-        }
-
-        function downloadReport() {
-            if (!state.report) {
-                log('warning', 'No report available');
-                return;
-            }
-
-            const element = document.createElement('a');
-            const file = new Blob([state.report], { type: 'text/html' });
-            element.href = URL.createObjectURL(file);
-            element.download = `secureflow-report-${state.currentTarget}-${new Date().toISOString().split('T')[0]}.html`;
-            document.body.appendChild(element);
-            element.click();
-            document.body.removeChild(element);
-
-            log('info', 'Report downloaded');
-        }
-
-        function clearLogs() {
-            document.getElementById('logs-container').innerHTML = '';
-            state.logs = [];
-            log('info', 'Logs cleared');
-        }
-
-        function loadHistory() {
-            fetch('/api/history')
-                .then(r => r.json())
-                .then(data => {
-                    const historyContainer = document.getElementById('history-container');
-                    if (data.sessions && data.sessions.length > 0) {
-                        historyContainer.innerHTML = data.sessions.map(s => `
-                            <div class="history-item">
-                                <div class="history-item-target">${s.target}</div>
-                                <div class="history-item-time">${new Date(s.timestamp).toLocaleString()}</div>
-                                <div class="history-item-status ${s.status}">${s.status.toUpperCase()}</div>
-                            </div>
-                        `).join('');
-                    }
-                })
-                .catch(e => log('warning', `Could not load history: ${e.message}`));
-        }
-
-        function openSettings() {
-            document.getElementById('settings-modal').classList.add('active');
-            loadSettings();
-        }
-
-        function closeSettings() {
-            document.getElementById('settings-modal').classList.remove('active');
-        }
-
-        function loadSettings() {
-            const stored = localStorage.getItem('secureflow-settings');
-            if (stored) {
-                const settings = JSON.parse(stored);
-                if (settings.claudeKey) document.getElementById('claude-key').value = settings.claudeKey;
-                if (settings.geminiKey) document.getElementById('gemini-key').value = settings.geminiKey;
-                if (settings.ollamaUrl) document.getElementById('ollama-url').value = settings.ollamaUrl;
-            }
-            checkProviderStatus();
-        }
-
-        function saveSettings() {
-            const settings = {
-                claudeKey: document.getElementById('claude-key').value,
-                geminiKey: document.getElementById('gemini-key').value,
-                ollamaUrl: document.getElementById('ollama-url').value,
-            };
-            localStorage.setItem('secureflow-settings', JSON.stringify(settings));
-            log('info', 'Settings saved to browser storage');
-            addMessage('System', 'Settings saved (browser storage only)');
-        }
-
-        function testProvider(provider) {
-            log('info', `Testing ${provider} provider...`);
-
-            // Simulate test (in real implementation, would call backend)
-            setTimeout(() => {
-                if (provider === 'claude') {
-                    const key = document.getElementById('claude-key').value;
-                    const status = key ? '✅ Configured' : '❌ Not configured';
-                    document.getElementById('claude-status').textContent = status;
-                } else if (provider === 'gemini') {
-                    const key = document.getElementById('gemini-key').value;
-                    const status = key ? '✅ Configured' : '❌ Not configured';
-                    document.getElementById('gemini-status').textContent = status;
-                } else if (provider === 'ollama') {
-                    const url = document.getElementById('ollama-url').value;
-                    fetch(`${url}/api/tags`, { timeout: 2000 })
-                        .then(r => {
-                            document.getElementById('ollama-status').textContent = '✅ Running';
-                        })
-                        .catch(() => {
-                            document.getElementById('ollama-status').textContent = '❌ Not responding';
-                        });
+        // Check if React app is built
+        fetch('/ui/index.html')
+            .then(r => {
+                if (r.ok && r.url.includes('dist')) {
+                    // React app is built, show success message
+                    document.querySelector('.success-status').style.display = 'block'
+                    // Redirect to React app
+                    setTimeout(() => {
+                        window.location.href = '/ui'
+                    }, 1000)
                 }
-                log('success', `${provider} test complete`);
-            }, 500);
-        }
-
-        function checkProviderStatus() {
-            // Check Ollama automatically
-            const ollamaUrl = document.getElementById('ollama-url').value || 'http://localhost:11434';
-            fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) })
-                .then(r => {
-                    document.getElementById('ollama-status').textContent = '✅ Running';
-                })
-                .catch(() => {
-                    document.getElementById('ollama-status').textContent = '❌ Not responding';
-                });
-        }
-
-        // Close modal on escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                closeSettings();
-            }
-        });
-
-        // Initialize
-        loadHistory();
-        log('info', 'Dashboard ready');
+            })
+            .catch(() => {
+                // React app not built, show setup instructions
+                console.log('React app not built. Run: cd frontend && npm install && npm run build')
+            })
     </script>
 </body>
 </html>

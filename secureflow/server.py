@@ -349,19 +349,62 @@ def run_code_review(code: str, language: str) -> dict:
         }
 
 @app.custom_route("/ui", methods=["GET"])
-async def serve_dashboard(request: Request):
-    """Serve the SecureFlow dashboard UI."""
+async def serve_dashboard_root(request: Request):
+    """Serve React dashboard root."""
     from starlette.responses import FileResponse
     from pathlib import Path
 
-    dashboard_path = Path(__file__).parent / "static" / "index.html"
-    if not dashboard_path.exists():
-        return FileResponse(
-            status_code=404,
-            content=b"Dashboard not found"
-        )
+    # Serve built React app
+    react_path = Path(__file__).parent / "static" / "dist" / "index.html"
+    if react_path.exists():
+        return FileResponse(str(react_path), media_type="text/html")
 
-    return FileResponse(dashboard_path, media_type="text/html")
+    # Fallback to old HTML
+    fallback_path = Path(__file__).parent / "static" / "index.html"
+    if fallback_path.exists():
+        return FileResponse(str(fallback_path), media_type="text/html")
+
+    return FileResponse(
+        status_code=404,
+        content=b"Dashboard not found"
+    )
+
+@app.custom_route("/ui/", methods=["GET"])
+async def serve_dashboard_root_slash(request: Request):
+    """Serve React dashboard root with trailing slash."""
+    from starlette.responses import FileResponse
+    from pathlib import Path
+
+    react_path = Path(__file__).parent / "static" / "dist" / "index.html"
+    if react_path.exists():
+        return FileResponse(str(react_path), media_type="text/html")
+
+    fallback_path = Path(__file__).parent / "static" / "index.html"
+    if fallback_path.exists():
+        return FileResponse(str(fallback_path), media_type="text/html")
+
+    return FileResponse(status_code=404, content=b"Dashboard not found")
+
+@app.custom_route("/ui/{path_remaining:path}", methods=["GET"])
+async def serve_dashboard_assets(request: Request):
+    """Serve React app assets and handle client-side routing."""
+    from starlette.responses import FileResponse
+    from pathlib import Path
+
+    path = request.path_params.get("path_remaining", "")
+
+    # Try to serve the exact file
+    if path:
+        asset_path = Path(__file__).parent / "static" / "dist" / path
+        if asset_path.exists() and asset_path.is_file():
+            return FileResponse(str(asset_path))
+
+    # For client-side routing, serve index.html
+    index_path = Path(__file__).parent / "static" / "dist" / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path), media_type="text/html")
+
+    return FileResponse(status_code=404, content=b"Not found")
 
 @app.custom_route("/api/history", methods=["GET"])
 async def get_scan_history(request: Request):
