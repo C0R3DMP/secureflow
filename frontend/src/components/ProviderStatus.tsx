@@ -7,9 +7,9 @@ import { useState } from 'react'
 const providerEmojis = {
   claude: '🤖',
   gemini: '✨',
+  openrouter: '🌐',
   ollama: '🦙',
   opencode: '💻',
-  'gemini-cli': '🌟',
 }
 
 interface ProviderStatusProps {

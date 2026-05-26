@@ -24,10 +24,11 @@ export interface PhaseStatus {
 }
 
 export interface Provider {
-  name: 'claude' | 'gemini' | 'ollama' | 'opencode' | 'gemini-cli'
+  name: 'claude' | 'gemini' | 'openrouter' | 'ollama' | 'opencode'
   status: 'available' | 'limited' | 'unavailable'
   priority: number
   lastCheck?: Date
+  mode?: 'cli' | 'api'
 }
 
 export interface ScanSession {

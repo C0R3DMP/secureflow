@@ -565,6 +565,63 @@ async def check_claude_cli_status(request: Request):
             "version": None
         })
 
+@app.custom_route("/api/providers", methods=["GET"])
+async def get_providers_status(request: Request):
+    """Get status of all LLM providers."""
+    from starlette.responses import JSONResponse
+    import subprocess
+    from secureflow.config import (
+        is_claude_cli_available,
+        is_gemini_cli_available,
+        is_ollama_available,
+        GEMINI_API_KEY,
+        OPENROUTER_API_KEY,
+        ANTHROPIC_API_KEY,
+    )
+
+    providers = {}
+
+    # Check Claude CLI
+    if is_claude_cli_available():
+        providers["claude"] = {"available": True, "mode": "cli"}
+    elif ANTHROPIC_API_KEY:
+        providers["claude"] = {"available": True, "mode": "api"}
+    else:
+        providers["claude"] = {"available": False}
+
+    # Check Gemini API
+    providers["gemini"] = {
+        "available": bool(GEMINI_API_KEY),
+        "mode": "api" if GEMINI_API_KEY else None
+    }
+
+    # Check OpenRouter
+    providers["openrouter"] = {
+        "available": bool(OPENROUTER_API_KEY),
+        "mode": "api" if OPENROUTER_API_KEY else None
+    }
+
+    # Check Ollama
+    providers["ollama"] = {
+        "available": is_ollama_available(),
+        "mode": "local"
+    }
+
+    # Check OpenCode
+    try:
+        from secureflow.config import OPENCODE_URL, OPENCODE_SERVER_PASSWORD
+        import requests
+        headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
+        response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
+        providers["opencode"] = {
+            "available": 200 <= response.status_code < 400,
+            "mode": "local"
+        }
+    except:
+        providers["opencode"] = {"available": False}
+
+    return JSONResponse(providers)
+
 @app.custom_route("/api/settings", methods=["POST"])
 async def save_settings(request: Request):
     """Save provider settings to environment."""
@@ -631,6 +688,8 @@ async def save_settings(request: Request):
 def main():
     """Run the FastMCP server on 0.0.0.0:5000 with SSE transport."""
     import asyncio
+    import subprocess
+    from secureflow.config import OPENCODE_SERVER_PASSWORD
 
     logger.info("Starting CrewAI Security MCP Server...")
     logger.info(f"Auth enabled: {bool(MCP_SECRET)}")
@@ -638,6 +697,21 @@ def main():
     logger.info("Host: 0.0.0.0")
     logger.info("Port: 5000")
     logger.info("Dashboard: http://localhost:5000/ui")
+
+    # Auto-start OpenCode if available
+    try:
+        logger.info("Attempting to start OpenCode server...")
+        opencode_process = subprocess.Popen(
+            ["opencode", "serve", "--port", "4096"],
+            env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        logger.info(f"OpenCode started (PID: {opencode_process.pid})")
+    except FileNotFoundError:
+        logger.warning("OpenCode not installed. Continuing without OpenCode support.")
+    except Exception as e:
+        logger.warning(f"Failed to start OpenCode: {e}")
 
     asyncio.run(
         app.run_http_async(

@@ -6,9 +6,9 @@ import { useState } from 'react';
 const providerEmojis = {
     claude: '🤖',
     gemini: '✨',
+    openrouter: '🌐',
     ollama: '🦙',
     opencode: '💻',
-    'gemini-cli': '🌟',
 };
 export function ProviderStatus({ providers, onTest }) {
     const [testing, setTesting] = useState(null);

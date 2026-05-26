@@ -49,12 +49,12 @@ export function Dashboard() {
     { name: 'analysis', status: 'pending' },
     { name: 'reporting', status: 'pending' },
   ])
-  const [providers] = useState<Provider[]>([
+  const [providers, setProviders] = useState<Provider[]>([
     { name: 'claude', status: 'unavailable', priority: 1 },
     { name: 'gemini', status: 'available', priority: 2, lastCheck: new Date() },
+    { name: 'openrouter', status: 'unavailable', priority: 2, lastCheck: new Date() },
     { name: 'ollama', status: 'available', priority: 3, lastCheck: new Date() },
     { name: 'opencode', status: 'unavailable', priority: 4 },
-    { name: 'gemini-cli', status: 'unavailable', priority: 5 },
   ])
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
@@ -202,6 +202,39 @@ export function Dashboard() {
 
   useEffect(() => {
     loadHistory()
+  }, [])
+
+  useEffect(() => {
+    // Fetch provider status from API
+    const fetchProviderStatus = async () => {
+      try {
+        const response = await fetch('/api/providers')
+        if (!response.ok) throw new Error('Failed to fetch provider status')
+        const data = await response.json()
+
+        setProviders((prev) =>
+          prev.map((provider) => {
+            const statusData = data[provider.name]
+            if (statusData) {
+              return {
+                ...provider,
+                status: statusData.available ? 'available' : 'unavailable',
+                mode: statusData.mode,
+                lastCheck: new Date(),
+              }
+            }
+            return provider
+          }),
+        )
+      } catch (error) {
+        console.warn('Could not fetch provider status:', error)
+      }
+    }
+
+    fetchProviderStatus()
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchProviderStatus, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   return (
