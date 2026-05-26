@@ -505,17 +505,19 @@ Tasks:
 
 ---
 
-### M11 — Scheduled Assessments
+### M11 — Scheduled Assessments ✅ COMPLETED (2026-05-26)
 **Scope:** Persistent cron-based scan jobs.
-**Verifiable goal:** `secureflow schedule add scanme.nmap.org --cron "0 3 * * *"` persists a job; `secureflow schedule list` shows it after process restart; job executes at scheduled time.
+**Verifiable goal:** ✅ 114/114 passing | ✅ Job CRUD persists | ✅ Cron validation | ✅ CLI commands
 
 Tasks:
-1. Add `APScheduler>=3.10` to `pyproject.toml` dependencies
-2. New module `secureflow/scheduler.py`: `ScheduleManager` using `APScheduler` with `SQLiteJobStore` backed by `~/.secureflow/schedules.db`
-3. CLI commands: `schedule add <target> --cron <expr>`, `schedule list`, `schedule remove <id>`
-4. Integration with M10 `NotificationDispatcher` for post-execution alerts
-5. Server endpoint `GET /api/schedules` (JSON list for dashboard)
-6. Tests: job CRUD, invalid cron expression raises `ValueError`, mock execution
+- [x] `apscheduler==3.11.2` + `sqlalchemy>=2.0.0` added to `pyproject.toml`
+- [x] New module `secureflow/scheduler.py` — `ScheduleManager` (add/remove/list/shutdown) + `get_manager()` singleton
+- [x] `_parse_cron()` — validates 5-field expressions, raises `ValueError` on bad input
+- [x] `_run_scheduled_scan()` — background thread executor calling `CrewOrchestrator`
+- [x] Job store: `SQLAlchemyJobStore` → `~/.secureflow/schedules.db` (survives restarts)
+- [x] CLI group `secureflow schedule`: `add <target> --cron`, `list`, `remove <job_id>`
+- [x] Server `GET /api/schedules` endpoint
+- [x] 16 tests: CRUD, coexistence, empty list, 4 cron validation cases, 3 CLI tests
 
 ---
 

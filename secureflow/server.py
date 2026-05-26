@@ -492,6 +492,18 @@ async def get_scan_status(request: Request):
     return JSONResponse({"scan_id": scan_id, **info})
 
 
+@app.custom_route("/api/schedules", methods=["GET"])
+async def get_schedules(request: Request):
+    """List all scheduled scans."""
+    from starlette.responses import JSONResponse
+    from secureflow.scheduler import get_manager
+    try:
+        jobs = get_manager().list_jobs()
+        return JSONResponse({"status": "success", "schedules": jobs})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 @app.custom_route("/api/history", methods=["GET"])
 async def get_scan_history(request: Request):
     """Get scan history from persistent storage."""

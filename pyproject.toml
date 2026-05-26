@@ -33,6 +33,8 @@ dependencies = [
     "requests>=2.31.0",
     "click>=8.0.0",
     "typer>=0.9.0",
+    "apscheduler>=3.10.0",
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.optional-dependencies]

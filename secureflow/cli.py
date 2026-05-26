@@ -186,6 +186,68 @@ def history(limit, session_type):
     click.secho("")
 
 
+@cli.group()
+def schedule():
+    """Manage scheduled security assessments."""
+    pass
+
+
+@schedule.command("add")
+@click.argument("target")
+@click.option("--cron", required=True, help='5-field cron expression, e.g. "0 3 * * *"')
+def schedule_add(target, cron):
+    """Schedule a recurring security scan on TARGET."""
+    try:
+        from secureflow.scheduler import get_manager
+        job_id = get_manager().add(target, cron)
+        click.secho(f"\n✅ Scheduled scan added", fg="green", bold=True)
+        click.secho(f"   ID:     {job_id}", fg="cyan")
+        click.secho(f"   Target: {target}", fg="cyan")
+        click.secho(f"   Cron:   {cron}", fg="cyan")
+    except ValueError as e:
+        click.secho(f"\n❌ Invalid cron expression: {e}", fg="red", bold=True)
+        raise SystemExit(1)
+    except Exception as e:
+        click.secho(f"\n❌ Error: {e}", fg="red", bold=True)
+        raise SystemExit(1)
+
+
+@schedule.command("list")
+def schedule_list():
+    """List all scheduled scans."""
+    from secureflow.scheduler import get_manager
+    jobs = get_manager().list_jobs()
+
+    if not jobs:
+        click.secho("\nNo scheduled scans.", fg="yellow")
+        return
+
+    click.secho("\n" + "=" * 70, fg="cyan")
+    click.secho("Scheduled Scans", fg="cyan", bold=True)
+    click.secho("=" * 70, fg="cyan")
+    click.secho(f"\n{'ID':<36} {'Target':<25} {'Next Run (UTC)'}", fg="cyan", bold=True)
+    click.secho("-" * 70, fg="cyan")
+    for j in jobs:
+        click.secho(f"{j['id']:<36} {j['target']:<25} {j['next_run'] or 'N/A'}", fg="white")
+    click.secho("")
+
+
+@schedule.command("remove")
+@click.argument("job_id")
+def schedule_remove(job_id):
+    """Remove a scheduled scan by JOB_ID."""
+    try:
+        from secureflow.scheduler import get_manager
+        get_manager().remove(job_id)
+        click.secho(f"\n✅ Scheduled scan {job_id} removed.", fg="green", bold=True)
+    except KeyError as e:
+        click.secho(f"\n❌ Not found: {e}", fg="red", bold=True)
+        raise SystemExit(1)
+    except Exception as e:
+        click.secho(f"\n❌ Error: {e}", fg="red", bold=True)
+        raise SystemExit(1)
+
+
 @cli.command()
 def server():
     """Start the SecureFlow MCP server."""
