@@ -13,6 +13,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OPENCODE_URL = os.getenv("OPENCODE_URL", "http://localhost:4096")
+OPENCODE_SERVER_PASSWORD = os.getenv("OPENCODE_SERVER_PASSWORD", "secureflow")
 MCP_SECRET = os.getenv("MCP_SECRET", "")
 
 # Rate limit tracking
@@ -26,6 +27,21 @@ def is_ollama_available(base_url: str = OLLAMA_BASE_URL, timeout: int = 2) -> bo
         return response.status_code == 200
     except Exception as e:
         logger.debug(f"Ollama health check failed: {e}")
+        return False
+
+def is_gemini_cli_available(timeout: int = 2) -> bool:
+    """Check if Gemini CLI is available."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["gemini", "--version"],
+            capture_output=True,
+            timeout=timeout,
+            text=True
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+        logger.debug(f"Gemini CLI check failed: {e}")
         return False
 
 
@@ -57,6 +73,11 @@ class LLMProviderStatus:
             "priority": 4,
             "available": False,  # Check dynamically in check_health
         },
+        "gemini-cli": {
+            "type": "local",
+            "priority": 5,
+            "available": is_gemini_cli_available(),
+        },
     }
 
     @staticmethod
@@ -70,10 +91,13 @@ class LLMProviderStatus:
             return is_ollama_available()
         elif provider == "opencode":
             try:
-                response = requests.get(f"{OPENCODE_URL}/", timeout=2)
+                headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
+                response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
                 return 200 <= response.status_code < 400
             except:
                 return False
+        elif provider == "gemini-cli":
+            return is_gemini_cli_available()
         return False
 
     @staticmethod

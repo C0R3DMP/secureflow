@@ -84,14 +84,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-card border border-border rounded-lg shadow-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50">
+      <div className="glass rounded-2xl shadow-2xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto border-white/10">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <h2 className="text-lg font-bold text-foreground">⚙️ Provider Settings</h2>
+        <div className="flex items-center justify-between p-6 border-b border-white/10">
+          <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+            ⚙️ Provider Settings
+          </h2>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-card transition-colors"
+            className="p-1 hover:bg-white/10 transition-colors rounded-lg"
           >
             <X className="h-5 w-5" />
           </button>
@@ -146,11 +148,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   value={claudeKey}
                   onChange={(e) => setClaudeKey(e.target.value)}
                   placeholder="ANTHROPIC_API_KEY"
-                  className="flex-1 px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="input-glass flex-1"
                 />
                 <button
                   onClick={() => handleTest('claude')}
-                  className="px-3 py-2 bg-accent hover:bg-accent/90 text-accent-foreground rounded-md text-sm font-semibold transition-colors"
+                  className="btn-primary px-3 py-2"
                 >
                   {tested.claude ? <Check className="h-4 w-4" /> : 'Test'}
                 </button>
@@ -163,9 +165,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 <button
                   onClick={checkClaudeCli}
                   disabled={checkingClaude}
-                  className="flex-1 px-3 py-2 bg-accent hover:bg-accent/90 text-accent-foreground rounded-md text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {checkingClaude && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {checkingClaude && <Loader2 className="h-4 w-4 spinner-spin" />}
                   {checkingClaude ? 'Checking...' : 'Check Status'}
                 </button>
               </div>
@@ -194,11 +196,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 value={geminiKey}
                 onChange={(e) => setGeminiKey(e.target.value)}
                 placeholder="GEMINI_API_KEY"
-                className="flex-1 px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                className="input-glass flex-1"
               />
               <button
                 onClick={() => handleTest('gemini')}
-                className="px-3 py-2 bg-accent hover:bg-accent/90 text-accent-foreground rounded-md text-sm font-semibold transition-colors"
+                className="btn-primary px-3 py-2"
               >
                 {tested.gemini ? <Check className="h-4 w-4" /> : 'Test'}
               </button>
@@ -212,7 +214,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               <select
                 value={geminiModel}
                 onChange={(e) => setGeminiModel(e.target.value)}
-                className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                className="input-glass w-full"
               >
                 <option value="gemini-2.0-flash">gemini-2.0-flash (default, free)</option>
                 <option value="gemini-1.5-pro">gemini-1.5-pro</option>
@@ -236,11 +238,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 value={ollamaUrl}
                 onChange={(e) => setOllamaUrl(e.target.value)}
                 placeholder="http://localhost:11434"
-                className="flex-1 px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                className="input-glass flex-1"
               />
               <button
                 onClick={() => handleTest('ollama')}
-                className="px-3 py-2 bg-accent hover:bg-accent/90 text-accent-foreground rounded-md text-sm font-semibold transition-colors"
+                className="btn-primary px-3 py-2"
               >
                 {tested.ollama ? <Check className="h-4 w-4" /> : 'Test'}
               </button>
@@ -250,25 +252,25 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             </p>
           </div>
 
-          <div className="bg-card/50 rounded border border-border p-3">
+          <div className="glass rounded-lg p-3 border-white/5">
             <p className="text-xs text-muted-foreground">
-              <strong>Note:</strong> Settings are stored in browser storage only.
-              These API keys are not transmitted to the server.
+              <strong>Note:</strong> Settings are stored locally and on the server.
+              API keys are securely transmitted via HTTPS.
             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex gap-2 p-6 border-t border-border">
+        <div className="flex gap-2 p-6 border-t border-white/10">
           <button
             onClick={handleSave}
-            className="flex-1 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-semibold transition-colors"
+            className="flex-1 btn-primary py-2 font-semibold"
           >
-            💾 Save Settings
+            💾 Save
           </button>
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 bg-card border border-border hover:bg-card/80 rounded-md font-semibold transition-colors"
+            className="flex-1 btn-glass"
           >
             Close
           </button>

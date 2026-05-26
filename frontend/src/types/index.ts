@@ -24,7 +24,7 @@ export interface PhaseStatus {
 }
 
 export interface Provider {
-  name: 'claude' | 'gemini' | 'ollama' | 'opencode'
+  name: 'claude' | 'gemini' | 'ollama' | 'opencode' | 'gemini-cli'
   status: 'available' | 'limited' | 'unavailable'
   priority: number
   lastCheck?: Date
