@@ -480,6 +480,72 @@ async def export_report(request: Request):
     )
 
 
+@app.custom_route("/api/providers", methods=["GET"])
+async def get_providers_status(request: Request):
+    """Get status of all LLM providers."""
+    from starlette.responses import JSONResponse
+
+    try:
+        import subprocess
+        from secureflow.config import (
+            is_claude_cli_available,
+            is_ollama_available,
+            GEMINI_API_KEY,
+            OPENROUTER_API_KEY,
+            ANTHROPIC_API_KEY,
+            OPENCODE_URL,
+            OPENCODE_SERVER_PASSWORD,
+        )
+        import requests
+
+        providers = {}
+
+        # Check Claude CLI
+        if is_claude_cli_available():
+            providers["claude"] = {"available": True, "mode": "cli"}
+        elif ANTHROPIC_API_KEY:
+            providers["claude"] = {"available": True, "mode": "api"}
+        else:
+            providers["claude"] = {"available": False}
+
+        # Check Gemini API
+        providers["gemini"] = {
+            "available": bool(GEMINI_API_KEY),
+            "mode": "api" if GEMINI_API_KEY else None
+        }
+
+        # Check OpenRouter
+        providers["openrouter"] = {
+            "available": bool(OPENROUTER_API_KEY),
+            "mode": "api" if OPENROUTER_API_KEY else None
+        }
+
+        # Check Ollama
+        providers["ollama"] = {
+            "available": is_ollama_available(),
+            "mode": "local"
+        }
+
+        # Check OpenCode
+        try:
+            headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
+            response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
+            providers["opencode"] = {
+                "available": 200 <= response.status_code < 400,
+                "mode": "local"
+            }
+        except:
+            providers["opencode"] = {"available": False}
+
+        return JSONResponse(providers)
+    except Exception as e:
+        logger.error(f"Provider status check failed: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "status": "error"}
+        )
+
+
 @app.custom_route("/api/scans/{scan_id}", methods=["GET"])
 async def get_scan_status(request: Request):
     """Get status of a specific scan by scan_id."""
@@ -496,8 +562,8 @@ async def get_scan_status(request: Request):
 async def get_schedules(request: Request):
     """List all scheduled scans."""
     from starlette.responses import JSONResponse
-    from secureflow.scheduler import get_manager
     try:
+        from secureflow.scheduler import get_manager
         jobs = get_manager().list_jobs()
         return JSONResponse({"status": "success", "schedules": jobs})
     except Exception as e:
@@ -564,63 +630,6 @@ async def check_claude_cli_status(request: Request):
             "available": False,
             "version": None
         })
-
-@app.custom_route("/api/providers", methods=["GET"])
-async def get_providers_status(request: Request):
-    """Get status of all LLM providers."""
-    from starlette.responses import JSONResponse
-    import subprocess
-    from secureflow.config import (
-        is_claude_cli_available,
-        is_gemini_cli_available,
-        is_ollama_available,
-        GEMINI_API_KEY,
-        OPENROUTER_API_KEY,
-        ANTHROPIC_API_KEY,
-    )
-
-    providers = {}
-
-    # Check Claude CLI
-    if is_claude_cli_available():
-        providers["claude"] = {"available": True, "mode": "cli"}
-    elif ANTHROPIC_API_KEY:
-        providers["claude"] = {"available": True, "mode": "api"}
-    else:
-        providers["claude"] = {"available": False}
-
-    # Check Gemini API
-    providers["gemini"] = {
-        "available": bool(GEMINI_API_KEY),
-        "mode": "api" if GEMINI_API_KEY else None
-    }
-
-    # Check OpenRouter
-    providers["openrouter"] = {
-        "available": bool(OPENROUTER_API_KEY),
-        "mode": "api" if OPENROUTER_API_KEY else None
-    }
-
-    # Check Ollama
-    providers["ollama"] = {
-        "available": is_ollama_available(),
-        "mode": "local"
-    }
-
-    # Check OpenCode
-    try:
-        from secureflow.config import OPENCODE_URL, OPENCODE_SERVER_PASSWORD
-        import requests
-        headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
-        response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
-        providers["opencode"] = {
-            "available": 200 <= response.status_code < 400,
-            "mode": "local"
-        }
-    except:
-        providers["opencode"] = {"available": False}
-
-    return JSONResponse(providers)
 
 @app.custom_route("/api/settings", methods=["POST"])
 async def save_settings(request: Request):

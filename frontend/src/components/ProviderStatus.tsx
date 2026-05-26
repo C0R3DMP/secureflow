@@ -47,6 +47,11 @@ export function ProviderStatus({ providers, onTest }: ProviderStatusProps) {
             <div>
               <p className="text-sm font-semibold capitalize text-foreground">
                 {provider.name}
+                {provider.mode && (
+                  <span className="text-xs font-normal ml-2 text-muted-foreground">
+                    ({provider.mode})
+                  </span>
+                )}
               </p>
               <p className="text-xs text-muted-foreground">
                 Priority: #{provider.priority}

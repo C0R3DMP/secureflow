@@ -12,6 +12,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [checkingClaude, setCheckingClaude] = useState(false)
   const [geminiKey, setGeminiKey] = useState('')
   const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash')
+  const [openrouterKey, setOpenrouterKey] = useState('')
+  const [openrouterModel, setOpenrouterModel] = useState('openrouter/google/gemini-2.0-flash-exp:free')
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
   const [tested, setTested] = useState<Record<string, boolean>>({})
 
@@ -24,6 +26,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       if (settings.claudeMode) setClaudeMode(settings.claudeMode)
       if (settings.geminiKey) setGeminiKey(settings.geminiKey)
       if (settings.geminiModel) setGeminiModel(settings.geminiModel)
+      if (settings.openrouterKey) setOpenrouterKey(settings.openrouterKey)
+      if (settings.openrouterModel) setOpenrouterModel(settings.openrouterModel)
       if (settings.ollamaUrl) setOllamaUrl(settings.ollamaUrl)
     }
 
@@ -59,6 +63,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       claudeMode,
       geminiKey,
       geminiModel,
+      openrouterKey,
+      openrouterModel,
       ollamaUrl,
     }
 
@@ -103,7 +109,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         <div className="p-6 space-y-6">
           <div>
             <p className="text-xs text-muted-foreground mb-4">
-              Configure your LLM providers. Priority: Claude &gt; Gemini &gt;
+              Configure your LLM providers. Priority: Claude &gt; Gemini &gt; OpenRouter &gt;
               Ollama
             </p>
           </div>
@@ -225,6 +231,62 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <p className="text-xs text-muted-foreground mt-1">
               Status: {geminiKey ? '✅ Configured' : '❌ Not configured'}
             </p>
+          </div>
+
+          {/* OpenRouter */}
+          <div>
+            <label className="text-sm font-semibold text-foreground block mb-2">
+              🌐 OpenRouter (Free Models)
+            </label>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="password"
+                value={openrouterKey}
+                onChange={(e) => setOpenrouterKey(e.target.value)}
+                placeholder="OPENROUTER_API_KEY"
+                className="input-glass flex-1"
+              />
+              <button
+                onClick={() => handleTest('openrouter')}
+                className="btn-primary px-3 py-2"
+              >
+                {tested.openrouter ? <Check className="h-4 w-4" /> : 'Test'}
+              </button>
+            </div>
+
+            {/* OpenRouter Model Selection */}
+            <div className="mb-2">
+              <label className="text-xs text-muted-foreground block mb-1">
+                Model
+              </label>
+              <select
+                value={openrouterModel}
+                onChange={(e) => setOpenrouterModel(e.target.value)}
+                className="input-glass w-full"
+              >
+                <option value="openrouter/google/gemini-2.0-flash-exp:free">
+                  Gemini 2.0 Flash (free)
+                </option>
+                <option value="openrouter/meta-llama/llama-3.1-8b-instruct:free">
+                  Llama 3.1 8B (free)
+                </option>
+                <option value="openrouter/anthropic/claude-3.5-sonnet">
+                  Claude 3.5 Sonnet
+                </option>
+              </select>
+            </div>
+
+            <p className="text-xs text-muted-foreground mt-1 mb-2">
+              Status: {openrouterKey ? '✅ Configured' : '❌ Not configured'}
+            </p>
+            <a
+              href="https://openrouter.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Get free API key at openrouter.ai →
+            </a>
           </div>
 
           {/* Ollama */}
