@@ -113,10 +113,15 @@ export function Dashboard() {
         }
         addMessage('system', `✓ ${event.phase} complete (${event.n}/${event.total})`)
         addLog('success', `Phase ${event.n}/${event.total}: ${event.phase}`)
+      } else if (event.event === 'report_ready') {
+        if (event.report) {
+          setReport(event.report)
+          addLog('success', 'Report generated and ready for download')
+          addMessage('system', '✅ Professional report generated!')
+        }
       } else if (event.event === 'complete') {
         addLog('success', 'Security assessment complete')
         addMessage('system', 'Assessment complete! Report ready for download.')
-        setReport(event.result || null)
         setIsScanning(false)
         loadHistory()
       } else if (event.event === 'error') {

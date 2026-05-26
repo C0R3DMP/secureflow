@@ -41,7 +41,7 @@ export interface ScanSession {
 }
 
 export interface StreamEvent {
-  event: 'start' | 'agent_message' | 'phase_complete' | 'complete' | 'error'
+  event: 'start' | 'agent_message' | 'phase_complete' | 'report_ready' | 'complete' | 'error'
   target?: string
   agent?: AgentRole
   phase?: string
@@ -50,4 +50,5 @@ export interface StreamEvent {
   result?: string
   message?: string
   timestamp?: string
+  report?: string
 }

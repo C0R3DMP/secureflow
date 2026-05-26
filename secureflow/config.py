@@ -70,8 +70,8 @@ class LLMProviderStatus:
             return is_ollama_available()
         elif provider == "opencode":
             try:
-                response = requests.get(f"{OPENCODE_URL}/session", timeout=2)
-                return response.status_code < 500
+                response = requests.get(f"{OPENCODE_URL}/", timeout=2)
+                return 200 <= response.status_code < 400
             except:
                 return False
         return False

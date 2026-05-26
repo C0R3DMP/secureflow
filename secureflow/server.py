@@ -267,6 +267,11 @@ async def stream_scan_sse(request: Request) -> StreamingResponse:
                 break
 
         result = await future
+
+        # Emit report if available
+        if result.get('report_html'):
+            yield f"data: {json.dumps({'event': 'report_ready', 'report': result.get('report_html'), 'target': target})}\n\n"
+
         yield f"data: {json.dumps({'event': 'complete', 'result': result.get('message', 'Assessment complete')})}\n\n"
 
     return StreamingResponse(
@@ -441,6 +446,100 @@ async def get_scan_history(request: Request):
         logger.error(f"History fetch failed: {str(e)}")
         return JSONResponse(
             status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
+
+@app.custom_route("/api/claude-cli-status", methods=["GET"])
+async def check_claude_cli_status(request: Request):
+    """Check if Claude CLI is available."""
+    from starlette.responses import JSONResponse
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True,
+            timeout=5,
+            text=True
+        )
+        if result.returncode == 0:
+            version = result.stdout.strip()
+            return JSONResponse({
+                "available": True,
+                "version": version
+            })
+        else:
+            return JSONResponse({
+                "available": False,
+                "version": None
+            })
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+        logger.debug(f"Claude CLI check failed: {str(e)}")
+        return JSONResponse({
+            "available": False,
+            "version": None
+        })
+
+@app.custom_route("/api/settings", methods=["POST"])
+async def save_settings(request: Request):
+    """Save provider settings to environment."""
+    from starlette.responses import JSONResponse
+    from pathlib import Path
+
+    try:
+        body = await request.json()
+
+        # Extract settings
+        claude_key = body.get("claudeKey", "")
+        claude_mode = body.get("claudeMode", "api")
+        gemini_key = body.get("geminiKey", "")
+        gemini_model = body.get("geminiModel", "gemini-2.0-flash")
+        ollama_url = body.get("ollamaUrl", "http://localhost:11434")
+
+        # Update environment
+        import os
+        if claude_key:
+            os.environ["ANTHROPIC_API_KEY"] = claude_key
+        os.environ["CLAUDE_MODE"] = claude_mode
+        if gemini_key:
+            os.environ["GEMINI_API_KEY"] = gemini_key
+        os.environ["GEMINI_MODEL"] = gemini_model
+        if ollama_url:
+            os.environ["OLLAMA_BASE_URL"] = ollama_url
+
+        # Try to update .env file
+        env_path = Path.home() / ".secureflow" / ".env"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+
+        env_content = ""
+        if claude_key:
+            env_content += f"ANTHROPIC_API_KEY={claude_key}\n"
+        env_content += f"CLAUDE_MODE={claude_mode}\n"
+        if gemini_key:
+            env_content += f"GEMINI_API_KEY={gemini_key}\n"
+        env_content += f"GEMINI_MODEL={gemini_model}\n"
+        if ollama_url:
+            env_content += f"OLLAMA_BASE_URL={ollama_url}\n"
+
+        with open(env_path, "w") as f:
+            f.write(env_content)
+
+        logger.info(f"Settings saved to {env_path}")
+
+        return JSONResponse({
+            "status": "success",
+            "message": "Settings saved successfully",
+            "settings": {
+                "claude_mode": claude_mode,
+                "gemini_model": gemini_model,
+                "ollama_url": ollama_url
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to save settings: {str(e)}")
+        return JSONResponse(
+            status_code=400,
             content={"status": "error", "message": str(e)}
         )
 
