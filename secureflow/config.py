@@ -5,8 +5,14 @@ import requests
 import litellm
 import logging
 from dotenv import load_dotenv
+from pathlib import Path
 
 load_dotenv()
+
+# Also load from ~/.secureflow/.env (runtime settings from UI)
+_secureflow_env = Path.home() / ".secureflow" / ".env"
+if _secureflow_env.exists():
+    load_dotenv(_secureflow_env, override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -166,12 +172,19 @@ def init_llms():
     return config
 
 def get_fallback_chain():
-    """Return the LLM fallback order: Gemini API → Ollama → Claude API."""
-    return [
+    """Return the LLM fallback order: Gemini API → OpenRouter → Ollama → Claude API."""
+    chain = [
         {"model": "gemini/gemini-2.5-flash"},
-        {"model": "ollama/qwen2.5-coder", "base_url": OLLAMA_BASE_URL},
-        {"model": "claude/claude-opus-4-6"},
     ]
+    if OPENROUTER_API_KEY:
+        chain.append({
+            "model": "openrouter/google/gemini-2.0-flash-exp:free",
+            "api_key": OPENROUTER_API_KEY,
+            "base_url": "https://openrouter.ai/api/v1",
+        })
+    chain.append({"model": "ollama/qwen2.5-coder", "base_url": OLLAMA_BASE_URL})
+    chain.append({"model": "claude/claude-opus-4-6"})
+    return chain
 
 def call_claude_cli(prompt: str, model: str = "claude-opus-4-6") -> str:
     """Call Claude via subprocess CLI directly."""

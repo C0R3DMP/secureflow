@@ -74,6 +74,33 @@ class CrewOrchestrator:
         self.log("INFO", "=" * 70)
 
         try:
+            def _on_step_complete(step) -> None:
+                """Callback fired on each agent step for real-time streaming."""
+                try:
+                    agent_role = getattr(step, 'agent', None)
+                    if agent_role:
+                        agent_role = getattr(agent_role, 'role', str(agent_role)).lower()
+                        if 'recon' in agent_role:
+                            agent_role = 'recon'
+                        elif 'analyst' in agent_role or 'analysis' in agent_role:
+                            agent_role = 'analyst'
+                        elif 'report' in agent_role:
+                            agent_role = 'reporter'
+                        else:
+                            agent_role = 'system'
+                    else:
+                        agent_role = 'system'
+
+                    step_text = str(step)[:300]
+                    _message_queue.put({
+                        'type': 'agent_message',
+                        'agent': agent_role,
+                        'message': step_text,
+                        'timestamp': datetime.now().isoformat()
+                    })
+                except Exception as e:
+                    self.log("WARN", f"Error in step callback: {str(e)}")
+
             def _on_task_complete(task_output) -> None:
                 """Callback fired when a task completes."""
                 try:
@@ -103,7 +130,7 @@ class CrewOrchestrator:
                 except Exception as e:
                     self.log("WARN", f"Error in task callback: {str(e)}")
 
-            crew = create_crew(target, task_callback=_on_task_complete)
+            crew = create_crew(target, task_callback=_on_task_complete, step_callback=_on_step_complete)
             result = crew.kickoff()
 
             self.context.write("session", "target", target)

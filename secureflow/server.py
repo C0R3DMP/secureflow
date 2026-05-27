@@ -20,6 +20,9 @@ from secureflow.crew.tasks import create_crew
 # Active scan registry: scan_id → {status, target, result}
 _active_scans: dict = {}
 
+# OpenCode process tracker for start/stop control
+_opencode_process: Any = None
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -652,6 +655,61 @@ async def check_claude_cli_status(request: Request):
             "version": None
         })
 
+@app.custom_route("/api/opencode/start", methods=["POST"])
+async def start_opencode_server(request: Request):
+    """Start the OpenCode server on port 4096."""
+    from starlette.responses import JSONResponse
+    global _opencode_process
+
+    if _opencode_process is not None:
+        return JSONResponse({"status": "already_running", "pid": _opencode_process.pid})
+
+    if _is_port_open("http://127.0.0.1:4096"):
+        return JSONResponse({"status": "already_running", "pid": -1})
+
+    try:
+        import subprocess
+        from secureflow.config import OPENCODE_SERVER_PASSWORD
+        _opencode_process = subprocess.Popen(
+            ["opencode", "serve", "--port", "4096"],
+            env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        logger.info(f"OpenCode started via API (PID: {_opencode_process.pid})")
+        return JSONResponse({"status": "started", "pid": _opencode_process.pid})
+    except FileNotFoundError:
+        return JSONResponse(status_code=500, content={"status": "error", "message": "opencode not installed"})
+    except Exception as e:
+        logger.error(f"Failed to start OpenCode: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@app.custom_route("/api/opencode/stop", methods=["POST"])
+async def stop_opencode_server(request: Request):
+    """Stop the OpenCode server."""
+    from starlette.responses import JSONResponse
+    global _opencode_process
+
+    if _opencode_process is None:
+        # Try to find and kill any opencode process on port 4096
+        try:
+            import subprocess
+            subprocess.run(["pkill", "-f", "opencode.*4096"], check=False)
+            return JSONResponse({"status": "stopped", "message": "Killed opencode processes on port 4096"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+    try:
+        _opencode_process.terminate()
+        _opencode_process.wait(timeout=5)
+        _opencode_process = None
+        return JSONResponse({"status": "stopped"})
+    except Exception as e:
+        logger.error(f"Failed to stop OpenCode: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 @app.custom_route("/api/settings", methods=["POST"])
 async def save_settings(request: Request):
     """Save provider settings to environment."""
@@ -666,6 +724,8 @@ async def save_settings(request: Request):
         claude_mode = body.get("claudeMode", "api")
         gemini_key = body.get("geminiKey", "")
         gemini_model = body.get("geminiModel", "gemini-2.5-flash")
+        openrouter_key = body.get("openrouterKey", "")
+        openrouter_model = body.get("openrouterModel", "")
         ollama_url = body.get("ollamaUrl", "http://localhost:11434")
 
         # Update environment
@@ -676,6 +736,10 @@ async def save_settings(request: Request):
         if gemini_key:
             os.environ["GEMINI_API_KEY"] = gemini_key
         os.environ["GEMINI_MODEL"] = gemini_model
+        if openrouter_key:
+            os.environ["OPENROUTER_API_KEY"] = openrouter_key
+        if openrouter_model:
+            os.environ["OPENROUTER_MODEL"] = openrouter_model
         if ollama_url:
             os.environ["OLLAMA_BASE_URL"] = ollama_url
 
@@ -690,6 +754,10 @@ async def save_settings(request: Request):
         if gemini_key:
             env_content += f"GEMINI_API_KEY={gemini_key}\n"
         env_content += f"GEMINI_MODEL={gemini_model}\n"
+        if openrouter_key:
+            env_content += f"OPENROUTER_API_KEY={openrouter_key}\n"
+        if openrouter_model:
+            env_content += f"OPENROUTER_MODEL={openrouter_model}\n"
         if ollama_url:
             env_content += f"OLLAMA_BASE_URL={ollama_url}\n"
 
@@ -720,6 +788,7 @@ def main():
     import asyncio
     import subprocess
     from secureflow.config import OPENCODE_SERVER_PASSWORD
+    global _opencode_process
 
     logger.info("Starting CrewAI Security MCP Server...")
     logger.info(f"Auth enabled: {bool(MCP_SECRET)}")
@@ -734,13 +803,13 @@ def main():
     else:
         try:
             logger.info("Attempting to start OpenCode server...")
-            opencode_process = subprocess.Popen(
+            _opencode_process = subprocess.Popen(
                 ["opencode", "serve", "--port", "4096"],
                 env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            logger.info(f"OpenCode started (PID: {opencode_process.pid})")
+            logger.info(f"OpenCode started (PID: {_opencode_process.pid})")
         except FileNotFoundError:
             logger.warning("OpenCode not installed. Continuing without OpenCode support.")
         except Exception as e:

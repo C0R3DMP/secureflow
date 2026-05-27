@@ -112,7 +112,7 @@ def create_recon_tasks(target: str):
 
     return {"recon": recon_task}
 
-def create_crew(target: str, task_callback=None):
+def create_crew(target: str, task_callback=None, step_callback=None):
     """Factory function to create a full security crew."""
     from crewai import Crew
     agents = create_agents()
@@ -122,6 +122,7 @@ def create_crew(target: str, task_callback=None):
         agents=[agents["recon"], agents["analyst"], agents["reporter"]],
         tasks=[tasks["recon"], tasks["analysis"], tasks["reporting"]],
         task_callback=task_callback,
+        step_callback=step_callback,
         verbose=True,
     )
 

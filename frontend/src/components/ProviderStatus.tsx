@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertCircle, XCircle, RefreshCw } from 'lucide-react'
+import { CheckCircle2, AlertCircle, XCircle, RefreshCw, Play, Square } from 'lucide-react'
 import { Badge } from './Badge'
 import type { Provider } from '../types'
 import clsx from 'clsx'
@@ -19,11 +19,37 @@ interface ProviderStatusProps {
 
 export function ProviderStatus({ providers, onTest }: ProviderStatusProps) {
   const [testing, setTesting] = useState<string | null>(null)
+  const [_starting, setStarting] = useState(false)
+  const [_stopping, setStopping] = useState(false)
 
   const handleTest = async (name: string) => {
     setTesting(name)
     onTest?.(name)
     setTimeout(() => setTesting(null), 2000)
+  }
+
+  const handleStartOpenCode = async () => {
+    setStarting(true)
+    try {
+      await fetch('/api/opencode/start', { method: 'POST' })
+      setTimeout(() => window.location.reload(), 1000)
+    } catch {
+      alert('Failed to start OpenCode server')
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  const handleStopOpenCode = async () => {
+    setStopping(true)
+    try {
+      await fetch('/api/opencode/stop', { method: 'POST' })
+      setTimeout(() => window.location.reload(), 1000)
+    } catch {
+      alert('Failed to stop OpenCode server')
+    } finally {
+      setStopping(false)
+    }
   }
 
   return (
@@ -93,6 +119,27 @@ export function ProviderStatus({ providers, onTest }: ProviderStatusProps) {
             >
               <RefreshCw className="h-4 w-4" />
             </button>
+
+            {provider.name === 'opencode' && (
+              <>
+                <button
+                  onClick={handleStartOpenCode}
+                  disabled={_starting}
+                  className="p-1 rounded hover:bg-green-500/20 transition-colors disabled:opacity-50"
+                  title="Start OpenCode"
+                >
+                  <Play className="h-4 w-4 text-green-400" />
+                </button>
+                <button
+                  onClick={handleStopOpenCode}
+                  disabled={_stopping}
+                  className="p-1 rounded hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                  title="Stop OpenCode"
+                >
+                  <Square className="h-4 w-4 text-red-400" />
+                </button>
+              </>
+            )}
           </div>
         </div>
       ))}

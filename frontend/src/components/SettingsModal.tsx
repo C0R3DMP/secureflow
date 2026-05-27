@@ -267,11 +267,17 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 <option value="openrouter/google/gemini-2.0-flash-exp:free">
                   Gemini 2.0 Flash (free)
                 </option>
-                <option value="openrouter/meta-llama/llama-3.1-8b-instruct:free">
-                  Llama 3.1 8B (free)
+                <option value="openrouter/meta-llama/llama-3.3-70b-instruct:free">
+                  Llama 3.3 70B (free)
                 </option>
-                <option value="openrouter/anthropic/claude-3.5-sonnet">
-                  Claude 3.5 Sonnet
+                <option value="openrouter/deepseek/deepseek-r1:free">
+                  DeepSeek R1 (free)
+                </option>
+                <option value="openrouter/mistralai/mistral-7b-instruct:free">
+                  Mistral 7B (free)
+                </option>
+                <option value="openrouter/microsoft/phi-3-mini-128k-instruct:free">
+                  Phi-3 Mini 128K (free)
                 </option>
               </select>
             </div>
