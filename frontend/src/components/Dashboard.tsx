@@ -232,8 +232,8 @@ export function Dashboard() {
     }
 
     fetchProviderStatus()
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchProviderStatus, 30000)
+    // Refresh every 5 seconds for near-real-time updates
+    const interval = setInterval(fetchProviderStatus, 5000)
     return () => clearInterval(interval)
   }, [])
 

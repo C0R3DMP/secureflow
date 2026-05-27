@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import uuid
 from queue import Empty, Queue
 from typing import Any
@@ -480,63 +481,83 @@ async def export_report(request: Request):
     )
 
 
+def _is_port_open(url: str, timeout: float = 2.0) -> bool:
+    """Check if a TCP port is open (no HTTP auth needed)."""
+    if not url:
+        return False
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 4096
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+def _get_providers_dict() -> dict:
+    """Get status of all LLM providers (blocking — run in executor)."""
+    import subprocess
+    from secureflow.config import (
+        is_claude_cli_available,
+        is_ollama_available,
+        GEMINI_API_KEY,
+        OPENROUTER_API_KEY,
+        ANTHROPIC_API_KEY,
+        OPENCODE_URL,
+        OPENCODE_SERVER_PASSWORD,
+    )
+    import requests
+
+    providers = {}
+
+    # Check Claude CLI
+    if is_claude_cli_available():
+        providers["claude"] = {"available": True, "mode": "cli"}
+    elif ANTHROPIC_API_KEY:
+        providers["claude"] = {"available": True, "mode": "api"}
+    else:
+        providers["claude"] = {"available": False}
+
+    # Check Gemini API
+    providers["gemini"] = {
+        "available": bool(GEMINI_API_KEY),
+        "mode": "api" if GEMINI_API_KEY else None
+    }
+
+    # Check OpenRouter
+    providers["openrouter"] = {
+        "available": bool(OPENROUTER_API_KEY),
+        "mode": "api" if OPENROUTER_API_KEY else None
+    }
+
+    # Check Ollama
+    providers["ollama"] = {
+        "available": is_ollama_available(),
+        "mode": "local"
+    }
+
+    # Check OpenCode — TCP connect check (bypasses HTTP auth issues)
+    providers["opencode"] = {
+        "available": _is_port_open(OPENCODE_URL),
+        "mode": "local"
+    }
+
+    return providers
+
+
 @app.custom_route("/api/providers", methods=["GET"])
 async def get_providers_status(request: Request):
     """Get status of all LLM providers."""
     from starlette.responses import JSONResponse
 
     try:
-        import subprocess
-        from secureflow.config import (
-            is_claude_cli_available,
-            is_ollama_available,
-            GEMINI_API_KEY,
-            OPENROUTER_API_KEY,
-            ANTHROPIC_API_KEY,
-            OPENCODE_URL,
-            OPENCODE_SERVER_PASSWORD,
-        )
-        import requests
-
-        providers = {}
-
-        # Check Claude CLI
-        if is_claude_cli_available():
-            providers["claude"] = {"available": True, "mode": "cli"}
-        elif ANTHROPIC_API_KEY:
-            providers["claude"] = {"available": True, "mode": "api"}
-        else:
-            providers["claude"] = {"available": False}
-
-        # Check Gemini API
-        providers["gemini"] = {
-            "available": bool(GEMINI_API_KEY),
-            "mode": "api" if GEMINI_API_KEY else None
-        }
-
-        # Check OpenRouter
-        providers["openrouter"] = {
-            "available": bool(OPENROUTER_API_KEY),
-            "mode": "api" if OPENROUTER_API_KEY else None
-        }
-
-        # Check Ollama
-        providers["ollama"] = {
-            "available": is_ollama_available(),
-            "mode": "local"
-        }
-
-        # Check OpenCode
-        try:
-            headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
-            response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
-            providers["opencode"] = {
-                "available": 200 <= response.status_code < 400,
-                "mode": "local"
-            }
-        except:
-            providers["opencode"] = {"available": False}
-
+        loop = asyncio.get_running_loop()
+        providers = await loop.run_in_executor(None, _get_providers_dict)
         return JSONResponse(providers)
     except Exception as e:
         logger.error(f"Provider status check failed: {str(e)}", exc_info=True)
@@ -707,20 +728,23 @@ def main():
     logger.info("Port: 5000")
     logger.info("Dashboard: http://localhost:5000/ui")
 
-    # Auto-start OpenCode if available
-    try:
-        logger.info("Attempting to start OpenCode server...")
-        opencode_process = subprocess.Popen(
-            ["opencode", "serve", "--port", "4096"],
-            env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        logger.info(f"OpenCode started (PID: {opencode_process.pid})")
-    except FileNotFoundError:
-        logger.warning("OpenCode not installed. Continuing without OpenCode support.")
-    except Exception as e:
-        logger.warning(f"Failed to start OpenCode: {e}")
+    # Auto-start OpenCode if available and not already running
+    if _is_port_open(OPENCODE_URL or "http://127.0.0.1:4096"):
+        logger.info("OpenCode already running on port 4096, skipping startup.")
+    else:
+        try:
+            logger.info("Attempting to start OpenCode server...")
+            opencode_process = subprocess.Popen(
+                ["opencode", "serve", "--port", "4096"],
+                env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            logger.info(f"OpenCode started (PID: {opencode_process.pid})")
+        except FileNotFoundError:
+            logger.warning("OpenCode not installed. Continuing without OpenCode support.")
+        except Exception as e:
+            logger.warning(f"Failed to start OpenCode: {e}")
 
     asyncio.run(
         app.run_http_async(
