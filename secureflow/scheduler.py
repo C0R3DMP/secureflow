@@ -1,5 +1,6 @@
 """Scheduled assessment manager — persistent cron jobs backed by SQLite."""
 
+import atexit
 import logging
 from pathlib import Path
 from typing import Any, Dict, List
@@ -123,4 +124,5 @@ def get_manager() -> ScheduleManager:
     global _manager
     if _manager is None:
         _manager = ScheduleManager()
+        atexit.register(_manager.shutdown)
     return _manager

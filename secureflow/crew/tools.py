@@ -37,6 +37,10 @@ class SecurityTools:
         Primary: nmap -Pn -sV --top-ports=50
         Fallback: socket-based scanner if nmap unavailable or times out.
         """
+        import re
+        if not target or target.startswith("-") or not re.match(r'^[a-zA-Z0-9.\-:/\[\]_]+$', target):
+            return {"status": "error", "scanner": "nmap", "message": "Invalid target format"}
+
         try:
             cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
@@ -368,21 +372,32 @@ if __name__ == "__main__":
 
     @staticmethod
     def create_file_impl(filepath: str, content: str, language: str) -> Dict[str, Any]:
-        """Create a file with the given content."""
+        """Create a file with the given content (restricted to safe directories)."""
         import os
-        try:
-            # Create parent directories if needed
-            os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+        from pathlib import Path
 
-            # Write content to file
-            with open(filepath, 'w') as f:
-                f.write(content)
+        _ALLOWED_PREFIXES = (
+            "/tmp/",
+            str(Path.home() / ".secureflow"),
+        )
+
+        try:
+            resolved = Path(filepath).resolve()
+            if not any(str(resolved).startswith(p) for p in _ALLOWED_PREFIXES):
+                return {
+                    "status": "error",
+                    "filepath": filepath,
+                    "message": "Path not allowed. Files may only be written under /tmp/ or ~/.secureflow/"
+                }
+
+            os.makedirs(str(resolved.parent), exist_ok=True)
+            resolved.write_text(content, encoding="utf-8")
 
             return {
                 "status": "success",
-                "filepath": filepath,
+                "filepath": str(resolved),
                 "size": len(content),
-                "message": f"File created successfully at {filepath}"
+                "message": f"File created successfully at {resolved}"
             }
         except Exception as e:
             return {

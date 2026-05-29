@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import hmac as _hmac
 import json
 import logging
 import os
@@ -52,10 +53,21 @@ def check_auth(auth_header: str = None) -> bool:
     token = auth_header[7:]
     expected_token = MCP_SECRET
 
-    if token != expected_token:
+    if not _hmac.compare_digest(token, expected_token):
         raise AuthError("Invalid bearer token")
 
     return True
+
+
+def _check_request_auth(request: Request):
+    """Return JSONResponse(401) if auth fails, None if auth passes."""
+    from starlette.responses import JSONResponse
+    try:
+        check_auth(request.headers.get("Authorization"))
+        return None
+    except AuthError as exc:
+        return JSONResponse(status_code=401, content={"error": str(exc)})
+
 
 @app.tool()
 async def run_security_crew(target: str) -> dict:
@@ -215,7 +227,13 @@ async def run_security_crew_stream(target: str, ctx: Context) -> dict:
         await ctx.info(f"✅ {label} complete ({n}/{len(_SECURITY_PHASES)})")
         await ctx.report_progress(n, len(_SECURITY_PHASES), f"{label} complete")
 
-    result = await future
+    try:
+        result = await future
+    except Exception as exc:
+        logger.error(f"Security crew stream failed: {exc}", exc_info=True)
+        await ctx.info(f"❌ Assessment failed: {exc}")
+        return {"status": "error", "target": target, "error": str(exc)}
+
     await ctx.info("✅ Security assessment complete!")
 
     return {
@@ -233,9 +251,16 @@ async def stream_scan_sse(request: Request) -> StreamingResponse:
 
     Events format: data: {"event": "<name>", ...}\\n\\n
     """
+    from starlette.responses import JSONResponse
     from secureflow.crew.orchestrator import get_message_queue, clear_message_queue
 
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     target = request.path_params["target"]
+    if not target or len(target) > 253:
+        return JSONResponse(status_code=400, content={"error": "Invalid target"})
 
     # Get the global message queue from orchestrator
     msg_queue = get_message_queue()
@@ -414,14 +439,18 @@ async def serve_dashboard_root_slash(request: Request):
 @app.custom_route("/ui/{path_remaining:path}", methods=["GET"])
 async def serve_dashboard_assets(request: Request):
     """Serve React app assets and handle client-side routing."""
-    from starlette.responses import FileResponse
+    from starlette.responses import FileResponse, JSONResponse
     from pathlib import Path
 
     path = request.path_params.get("path_remaining", "")
 
-    # Try to serve the exact file
+    # Try to serve the exact file (with path traversal protection)
     if path:
-        asset_path = Path(__file__).parent / "static" / "dist" / path
+        base_dir = (Path(__file__).parent / "static" / "dist").resolve()
+        asset_path = (base_dir / path).resolve()
+        # Ensure resolved path stays within static/dist
+        if not str(asset_path).startswith(str(base_dir)):
+            return JSONResponse(status_code=403, content={"error": "Forbidden"})
         if asset_path.exists() and asset_path.is_file():
             return FileResponse(str(asset_path))
 
@@ -444,6 +473,10 @@ async def export_report(request: Request):
     from starlette.responses import FileResponse, JSONResponse
     from pathlib import Path
     from secureflow.reports import ReportExporter
+
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
 
     target = request.query_params.get("target", "")
     fmt = request.query_params.get("format", "json").lower()
@@ -558,6 +591,10 @@ async def get_providers_status(request: Request):
     """Get status of all LLM providers."""
     from starlette.responses import JSONResponse
 
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     try:
         loop = asyncio.get_running_loop()
         providers = await loop.run_in_executor(None, _get_providers_dict)
@@ -575,6 +612,10 @@ async def get_scan_status(request: Request):
     """Get status of a specific scan by scan_id."""
     from starlette.responses import JSONResponse
 
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     scan_id = request.path_params["scan_id"]
     info = _active_scans.get(scan_id)
     if info is None:
@@ -586,6 +627,11 @@ async def get_scan_status(request: Request):
 async def get_schedules(request: Request):
     """List all scheduled scans."""
     from starlette.responses import JSONResponse
+
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     try:
         from secureflow.scheduler import get_manager
         jobs = get_manager().list_jobs()
@@ -599,6 +645,10 @@ async def get_scan_history(request: Request):
     """Get scan history from persistent storage."""
     from starlette.responses import JSONResponse
     from secureflow.crew.history import SessionHistory
+
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
 
     try:
         history = SessionHistory()
@@ -629,6 +679,10 @@ async def check_claude_cli_status(request: Request):
     """Check if Claude CLI is available."""
     from starlette.responses import JSONResponse
     import subprocess
+
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
 
     try:
         result = subprocess.run(
@@ -661,6 +715,10 @@ async def start_opencode_server(request: Request):
     from starlette.responses import JSONResponse
     global _opencode_process
 
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     if _opencode_process is not None:
         return JSONResponse({"status": "already_running", "pid": _opencode_process.pid})
 
@@ -673,8 +731,8 @@ async def start_opencode_server(request: Request):
         _opencode_process = subprocess.Popen(
             ["opencode", "serve", "--port", "4096"],
             env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         logger.info(f"OpenCode started via API (PID: {_opencode_process.pid})")
         return JSONResponse({"status": "started", "pid": _opencode_process.pid})
@@ -691,6 +749,10 @@ async def stop_opencode_server(request: Request):
     from starlette.responses import JSONResponse
     global _opencode_process
 
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     if _opencode_process is None:
         # Try to find and kill any opencode process on port 4096
         try:
@@ -702,12 +764,17 @@ async def stop_opencode_server(request: Request):
 
     try:
         _opencode_process.terminate()
-        _opencode_process.wait(timeout=5)
-        _opencode_process = None
-        return JSONResponse({"status": "stopped"})
+        try:
+            _opencode_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _opencode_process.kill()
+            _opencode_process.wait(timeout=2)
     except Exception as e:
         logger.error(f"Failed to stop OpenCode: {e}")
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+    finally:
+        _opencode_process = None
+    return JSONResponse({"status": "stopped"})
 
 
 @app.custom_route("/api/settings", methods=["POST"])
@@ -716,17 +783,25 @@ async def save_settings(request: Request):
     from starlette.responses import JSONResponse
     from pathlib import Path
 
+    auth_err = _check_request_auth(request)
+    if auth_err:
+        return auth_err
+
     try:
         body = await request.json()
 
-        # Extract settings
-        claude_key = body.get("claudeKey", "")
-        claude_mode = body.get("claudeMode", "api")
-        gemini_key = body.get("geminiKey", "")
-        gemini_model = body.get("geminiModel", "gemini-2.5-flash")
-        openrouter_key = body.get("openrouterKey", "")
-        openrouter_model = body.get("openrouterModel", "")
-        ollama_url = body.get("ollamaUrl", "http://localhost:11434")
+        def _sanitize(value: str) -> str:
+            """Strip newlines and carriage returns to prevent .env injection."""
+            return str(value).replace("\n", "").replace("\r", "").strip()
+
+        # Extract and sanitize settings
+        claude_key = _sanitize(body.get("claudeKey", ""))
+        claude_mode = _sanitize(body.get("claudeMode", "api"))
+        gemini_key = _sanitize(body.get("geminiKey", ""))
+        gemini_model = _sanitize(body.get("geminiModel", "gemini-2.5-flash"))
+        openrouter_key = _sanitize(body.get("openrouterKey", ""))
+        openrouter_model = _sanitize(body.get("openrouterModel", ""))
+        ollama_url = _sanitize(body.get("ollamaUrl", "http://localhost:11434"))
 
         # Update environment
         import os

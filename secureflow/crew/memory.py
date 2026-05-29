@@ -57,7 +57,7 @@ class SharedContext:
     def write(self, agent_name: str, key: str, value: Any) -> None:
         """Write a finding to shared context."""
         with self.lock:
-            value_json = json.dumps(value) if not isinstance(value, str) else value
+            value_json = json.dumps(value)
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO findings (agent_name, key, value) VALUES (?, ?, ?)",

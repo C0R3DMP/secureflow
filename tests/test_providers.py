@@ -133,7 +133,9 @@ def test_providers_route_runs_in_executor():
     mock_request = MagicMock()
     mock_providers = {"claude": {"available": True, "mode": "cli"}}
 
-    with patch("secureflow.server._get_providers_dict", return_value=mock_providers):
+    # Disable auth so the test can reach the executor logic being tested
+    with patch("secureflow.server.MCP_SECRET", ""), \
+         patch("secureflow.server._get_providers_dict", return_value=mock_providers):
         result = asyncio.run(get_providers_status(mock_request))
 
     body = json.loads(result.body)

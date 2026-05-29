@@ -131,7 +131,7 @@ class LLMProviderStatus:
                 headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
                 response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
                 return 200 <= response.status_code < 400
-            except:
+            except Exception:
                 return False
         return False
 

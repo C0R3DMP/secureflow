@@ -9,7 +9,8 @@ _REPORT_DIR = Path.home() / ".secureflow"
 
 
 def _report_stem(target: str) -> str:
-    return target.replace("/", "_").replace(":", "_").replace(" ", "_")
+    stem = target.replace("/", "_").replace(":", "_").replace(" ", "_").replace(".", "_")
+    return stem[:200]
 
 
 class ReportExporter:

@@ -97,14 +97,15 @@ def build(task, language, output):
             click.secho("\n✅ Development crew completed successfully!", fg="green", bold=True)
             click.secho(f"   Output directory: {output}", fg="green")
             click.secho(f"   Session log: {orchestrator.log_path}", fg="green")
-            return 0
         else:
             click.secho(f"\n❌ Development crew failed: {result.get('error', 'Unknown error')}", fg="red", bold=True)
-            return 1
+            raise SystemExit(1)
+    except SystemExit:
+        raise
     except Exception as e:
         click.secho(f"\n❌ Error: {str(e)}", fg="red", bold=True)
         logger.error(f"Build command failed: {str(e)}", exc_info=True)
-        return 1
+        raise SystemExit(1)
 
 
 @cli.command()
@@ -141,14 +142,15 @@ def scan(target, fmt):
             click.secho("\n✅ Security assessment completed!", fg="green", bold=True)
             click.secho(f"   Report ({fmt.upper()}): {report_path}", fg="green")
             click.secho(f"   Session log: {orchestrator.log_path}", fg="green")
-            return 0
         else:
             click.secho(f"\n❌ Assessment failed: {result.get('error', 'Unknown error')}", fg="red", bold=True)
-            return 1
+            raise SystemExit(1)
+    except SystemExit:
+        raise
     except Exception as e:
         click.secho(f"\n❌ Error: {str(e)}", fg="red", bold=True)
         logger.error(f"Scan command failed: {str(e)}", exc_info=True)
-        return 1
+        raise SystemExit(1)
 
 
 @cli.command()
@@ -158,7 +160,11 @@ def history(limit, session_type):
     """Show history of past scan and build sessions."""
     from secureflow.crew.history import SessionHistory
 
-    sessions = SessionHistory().get_sessions(limit=limit, session_type=session_type)
+    try:
+        sessions = SessionHistory().get_sessions(limit=limit, session_type=session_type)
+    except Exception as e:
+        click.secho(f"\n❌ Failed to load history: {e}", fg="red", bold=True)
+        raise SystemExit(1)
 
     if not sessions:
         click.secho("\nNo sessions found.", fg="yellow")
@@ -216,7 +222,12 @@ def schedule_add(target, cron):
 def schedule_list():
     """List all scheduled scans."""
     from secureflow.scheduler import get_manager
-    jobs = get_manager().list_jobs()
+
+    try:
+        jobs = get_manager().list_jobs()
+    except Exception as e:
+        click.secho(f"\n❌ Failed to list schedules: {e}", fg="red", bold=True)
+        raise SystemExit(1)
 
     if not jobs:
         click.secho("\nNo scheduled scans.", fg="yellow")
@@ -335,10 +346,10 @@ def tui():
         import requests
         import time
 
-        # Check server status
+        # Check server status via actual HTTP endpoint
         try:
-            response = requests.get("http://localhost:5000/crew_status", timeout=2)
-            server_status = response.json() if response.status_code == 200 else None
+            response = requests.get("http://localhost:5000/api/history", timeout=2)
+            server_status = {"status": "healthy"} if response.status_code in (200, 401) else None
         except Exception:
             server_status = None
 

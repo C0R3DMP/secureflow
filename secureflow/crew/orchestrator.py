@@ -43,17 +43,19 @@ class CrewOrchestrator:
     def _init_logger(self) -> logging.Logger:
         """Initialize logging for crew collaboration."""
         logger = logging.getLogger("CrewOrchestrator")
-        logger.setLevel(logging.INFO)
+        if logger.handlers:
+            return logger
 
-        handler = logging.FileHandler(self.log_path)
+        logger.setLevel(logging.INFO)
         formatter = logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+
+        handler = logging.FileHandler(self.log_path)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
-        # Also console output
         console = logging.StreamHandler()
         console.setFormatter(formatter)
         logger.addHandler(console)
@@ -67,7 +69,6 @@ class CrewOrchestrator:
     def run_security_crew(self, target: str) -> Dict[str, Any]:
         """Run full security crew (recon → analysis → reporting) as a single unified Crew."""
         self.target = target
-        self.context.clear()
         clear_message_queue()
 
         self.log("INFO", f"🚀 Starting security crew for target: {target}")

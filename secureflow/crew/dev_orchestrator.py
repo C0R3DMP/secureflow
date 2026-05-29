@@ -27,21 +27,20 @@ class DevOrchestrator:
     def _init_logger(self) -> logging.Logger:
         """Initialize logger for session."""
         logger = logging.getLogger("DevCrew")
+        if logger.handlers:
+            return logger
+
         logger.setLevel(logging.DEBUG)
-
-        # File handler
-        fh = logging.FileHandler(self.log_path)
-        fh.setLevel(logging.DEBUG)
-
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-
-        # Formatter
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
+
+        fh = logging.FileHandler(self.log_path)
+        fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
+
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
 
         logger.addHandler(fh)
