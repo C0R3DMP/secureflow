@@ -32,7 +32,7 @@ class CrewAgents:
     def create_recon_agent():
         """Fast reconnaissance agent (Gemini API / Ollama)."""
         return Agent(
-            role="Expert Penetration Tester - Reconnaissance",
+            role="Security Reconnaissance Specialist",
             goal=(
                 "Execute comprehensive network reconnaissance to identify ALL open ports, services, versions, "
                 "and vulnerabilities. You MUST use the nmap_scan tool. Report findings in structured format."
@@ -60,7 +60,7 @@ class CrewAgents:
     def create_analyst_agent():
         """Deep analysis agent (Gemini API / Ollama)."""
         return Agent(
-            role="Senior Vulnerability Analyst - Technical Expert",
+            role="Vulnerability Analysis Expert",
             goal=(
                 "Read reconnaissance findings from shared context. Perform deep vulnerability analysis, "
                 "correlate CVEs, assess exploitability and business impact. Identify exploitation chains and lateral movement paths."
@@ -91,7 +91,7 @@ class CrewAgents:
     def create_reporter_agent():
         """Reporting agent (Gemini API / Ollama)."""
         return Agent(
-            role="Professional Security Report Writer",
+            role="Security Report Specialist",
             goal=(
                 "Read ALL recon and analysis findings from shared context. Generate executive-ready penetration test report "
                 "with complete findings, risk ratings, remediation roadmap, and clear business-aligned recommendations."
@@ -132,7 +132,7 @@ class DevAgents:
         from secureflow.crew.tools import design_system, recommend_stack, plan_structure
 
         return Agent(
-            role="Principal Software Architect",
+            role="Software Architect",
             goal=(
                 "Design robust, scalable system architecture. Evaluate and recommend optimal technology stack. "
                 "Plan complete project structure for developers to implement. Save all decisions to shared context."
@@ -172,7 +172,7 @@ class DevAgents:
         from secureflow.crew.tools import write_code, create_file, test_code
 
         return Agent(
-            role="Senior Fullstack Developer",
+            role="Senior Software Developer",
             goal=(
                 "Read architecture design from shared context. Implement production-ready code with strong testing, "
                 "clean structure, and comprehensive documentation. Save all code to shared context."
@@ -212,7 +212,7 @@ class DevAgents:
         from secureflow.crew.tools import review_code, suggest_improvements, find_bugs
 
         return Agent(
-            role="Principal Code Reviewer - Quality Expert",
+            role="Code Quality Reviewer",
             goal=(
                 "Read architecture and implementation code from shared context. Perform comprehensive code review, "
                 "identify bugs and security issues, suggest improvements. Ensure code meets production standards."

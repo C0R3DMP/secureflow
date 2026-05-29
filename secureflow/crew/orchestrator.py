@@ -206,13 +206,13 @@ class CrewOrchestrator:
 
     def _format_report(self, target: str, content: str) -> str:
         """Format crew output as professional HTML report."""
-        import html
+        import html as html_module
         from datetime import datetime
-        content = html.escape(content)
+        content = html_module.escape(content)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        html = f"""<!DOCTYPE html>
+        report_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -286,7 +286,7 @@ class CrewOrchestrator:
 </body>
 </html>"""
 
-        return html
+        return report_html
 
     def export_session(self) -> str:
         """Export full session summary."""

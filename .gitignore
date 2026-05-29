@@ -65,3 +65,7 @@ coverage.xml
 dist/
 build/
 *.egg-info/
+
+# Keep the compiled React dashboard in the repo so the server can serve it
+!secureflow/static/dist/
+!secureflow/static/dist/**
