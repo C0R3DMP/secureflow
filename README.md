@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 126/126](https://img.shields.io/badge/tests-126%2F126%20passing-brightgreen)](#testing)
+[![Tests: 151/151](https://img.shields.io/badge/tests-151%2F151%20passing-brightgreen)](#testing)
 [![Status: Production](https://img.shields.io/badge/status-production--ready-success)](https://github.com/secureflow/secureflow)
 
 SecureFlow is a complete AI-powered security assessment and application development platform. Multi-agent teams (Recon, Analyst, Reporter) collaborate via shared context to execute comprehensive penetration tests. Supports Claude, Gemini, and Ollama LLMs.
@@ -12,9 +12,23 @@ SecureFlow is a complete AI-powered security assessment and application developm
 ## Features
 
 ### 🔒 Security Assessment Workflow
-- **Security Reconnaissance Specialist** (Gemini API/Ollama) — Network reconnaissance, port scanning, CVE discovery via nmap
+- **Security Reconnaissance Specialist** (Gemini API/Ollama) — Network port scanning, DNS enumeration, web fingerprinting, TLS inspection, security-header auditing, sensitive-path probing, and CVE discovery
 - **Vulnerability Analysis Expert** (Gemini API/Ollama) — Vulnerability analysis, exploitability assessment, attack chain identification
 - **Security Report Specialist** (Gemini API/Ollama) — Executive reporting, CVSS scoring, 90-day remediation roadmap
+
+### 🧰 Reconnaissance Toolkit
+
+The recon agent uses a suite of built-in tools. The web/DNS/TLS tools are **pure-Python** (no external binaries required) so they work on any deployment, with `nmap` used automatically when present:
+
+| Tool | Purpose |
+|------|---------|
+| **Nmap Scan** | Port & service discovery (`nmap -sV`, socket fallback with banner grabbing) |
+| **DNS Enumeration** | A / AAAA / MX / NS / TXT / CNAME / SOA records (dnspython) |
+| **HTTP Fingerprint** | Server banner, page title, and technology detection (CMS, frameworks, languages) |
+| **Security Header Audit** | Detects missing HSTS, CSP, X-Frame-Options, X-Content-Type-Options, etc. |
+| **Sensitive Path Probe** | Checks for exposed `/.git`, `/.env`, backups, admin panels, actuator endpoints |
+| **TLS Certificate Inspection** | Cert subject/issuer/expiry, negotiated protocol & cipher, self-signed / weak-protocol warnings |
+| **CVE Lookup** | Known vulnerabilities per service/product (NVD API) |
 
 ### 💻 Development Workflow
 - **Software Architect** — System design, tech stack selection, project structure planning
@@ -28,7 +42,7 @@ SecureFlow is a complete AI-powered security assessment and application developm
 - CLI interface with full command support
 - Report export (HTML, PDF, JSON)
 - Webhook notifications (HMAC-SHA256 signed) & scheduled scans
-- 126 automated tests, comprehensive coverage
+- 151 automated tests, comprehensive coverage
 
 ## Quick Start
 
@@ -138,8 +152,11 @@ All `/api/*` and `/stream/*` endpoints require `Authorization: Bearer <MCP_SECRE
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ Phase 1: RECONNAISSANCE (Security Reconnaissance Spec.) │
-│  • nmap scan (top 50 ports, socket fallback)            │
-│  • Service version detection                            │
+│  • nmap scan (top 50 ports, socket+banner fallback)     │
+│  • DNS enumeration (A/MX/NS/TXT/...)                     │
+│  • HTTP fingerprint + security-header audit             │
+│  • Sensitive-path probe (/.git, /.env, backups)         │
+│  • TLS certificate inspection                           │
 │  • CVE lookup per service (NVD API)                     │
 │  └─→ Save to SharedContext: recon_scan_results          │
 └──────────────────┬──────────────────────────────────────┘
@@ -181,7 +198,7 @@ pytest tests/ --cov=secureflow
 pytest tests/test_cli.py -v
 ```
 
-Status: **126/126 tests passing** ✅
+Status: **151/151 tests passing** ✅
 
 ## Project Structure
 
@@ -197,7 +214,7 @@ secureflow/
 │   └── crew/
 │       ├── agents.py             # 6 specialist agent definitions
 │       ├── tasks.py              # Task & crew factories
-│       ├── tools.py              # Agent tools (nmap, CVE lookup, file ops)
+│       ├── tools.py              # Agent tools (nmap, DNS, HTTP/TLS recon, CVE, file ops)
 │       ├── memory.py             # Thread-safe SQLite shared context
 │       ├── history.py            # Thread-safe session history
 │       ├── orchestrator.py       # Security workflow orchestrator
@@ -208,7 +225,7 @@ secureflow/
 │       ├── components/           # Dashboard, LogViewer, SettingsModal…
 │       └── hooks/                # useAPI, useSSE
 ├── secureflow/static/dist/       # Compiled React build (served by server)
-├── tests/                        # 126 automated tests
+├── tests/                        # 151 automated tests
 └── pyproject.toml               # Package metadata
 ```
 
@@ -250,6 +267,7 @@ All `/api/*` and `/stream/*` routes return `401 Unauthorized` when the token is 
 - [x] **M11** — Scheduled scans with cron & SQLite persistence
 - [x] **M12** — Claude/Gemini CLI support, detailed agent prompts, robust server launcher
 - [x] **M13** — Security hardening (auth enforcement, path traversal, injection fixes, thread safety)
+- [x] **M14** — Expanded recon toolkit (DNS enum, HTTP fingerprint, security-header audit, sensitive-path probe, TLS inspection) — stress-tested under high concurrency
 
 ## Contributing
 

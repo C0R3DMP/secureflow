@@ -1,9 +1,11 @@
 import socket
+import ssl
 import subprocess
 import json
 import threading
 import time
 import requests
+from urllib.parse import urlparse
 from typing import Dict, List, Any
 import re
 from crewai.tools import tool
@@ -23,6 +25,69 @@ _SERVICE_NAMES = {
     3389: "rdp", 5432: "postgresql", 5900: "vnc", 6379: "redis",
     8080: "http-alt", 8443: "https-alt", 8888: "http-alt", 27017: "mongodb",
 }
+
+# Ports that emit a banner on connect (used for lightweight version detection)
+_BANNER_PORTS = {21, 22, 23, 25, 110, 143, 3306, 6379}
+
+# Security-relevant HTTP response headers and why they matter.
+_SECURITY_HEADERS = {
+    "Strict-Transport-Security": "Enforces HTTPS (HSTS); prevents protocol downgrade",
+    "Content-Security-Policy": "Mitigates XSS and data injection attacks",
+    "X-Frame-Options": "Prevents clickjacking via framing",
+    "X-Content-Type-Options": "Stops MIME-sniffing (should be 'nosniff')",
+    "Referrer-Policy": "Controls referrer leakage to third parties",
+    "Permissions-Policy": "Restricts access to powerful browser features",
+}
+
+# Sensitive paths frequently left exposed. Probed read-only with GET.
+_SENSITIVE_PATHS = [
+    "/.git/config", "/.git/HEAD", "/.env", "/.env.local", "/.env.backup",
+    "/config.php.bak", "/wp-config.php.bak", "/.aws/credentials",
+    "/.ssh/id_rsa", "/backup.zip", "/backup.sql", "/dump.sql",
+    "/.DS_Store", "/robots.txt", "/sitemap.xml", "/server-status",
+    "/phpinfo.php", "/admin", "/admin/login", "/.htaccess",
+    "/swagger.json", "/api/swagger.json", "/actuator/health", "/actuator/env",
+]
+
+# Header/cookie substrings → technology fingerprint.
+_TECH_SIGNATURES = {
+    "server": {
+        "nginx": "nginx", "apache": "Apache", "iis": "Microsoft IIS",
+        "cloudflare": "Cloudflare", "gunicorn": "Gunicorn", "werkzeug": "Werkzeug/Flask",
+        "openresty": "OpenResty", "litespeed": "LiteSpeed", "caddy": "Caddy",
+    },
+    "x-powered-by": {
+        "php": "PHP", "express": "Express.js", "asp.net": "ASP.NET",
+        "next.js": "Next.js", "servlet": "Java Servlet",
+    },
+    "cookie": {
+        "wordpress_": "WordPress", "wp-": "WordPress", "phpsessid": "PHP",
+        "jsessionid": "Java", "csrftoken": "Django", "laravel_session": "Laravel",
+        "connect.sid": "Express.js",
+    },
+}
+
+
+def _validate_target(target: str) -> bool:
+    """Reject empty, flag-like, overlong, or malformed targets (hostname/IP/CIDR only)."""
+    if not target or target.startswith("-"):
+        return False
+    if len(target) > 253:  # DNS name length limit (RFC 1035)
+        return False
+    return bool(re.match(r'^[a-zA-Z0-9.\-:/\[\]_]+$', target))
+
+
+# Exceptions a network probe may raise that should degrade to a clean error
+# rather than crash the agent (RequestException, IDNA/UnicodeError, bad input).
+_NET_ERRORS = (requests.exceptions.RequestException, UnicodeError, ValueError, OSError)
+
+
+def _normalize_url(target: str, prefer_https: bool = True) -> str:
+    """Turn a bare host or partial URL into a full http(s):// URL."""
+    if target.startswith(("http://", "https://")):
+        return target
+    scheme = "https" if prefer_https else "http"
+    return f"{scheme}://{target}"
 
 
 class SecurityTools:
@@ -84,9 +149,15 @@ class SecurityTools:
 
         for port in _COMMON_PORTS:
             try:
-                with socket.create_connection((host, port), timeout=timeout):
+                with socket.create_connection((host, port), timeout=timeout) as conn:
                     service = _SERVICE_NAMES.get(port, "unknown")
-                    open_ports.append({"port": f"{port}/tcp", "state": "open", "service": service})
+                    banner = ""
+                    if port in _BANNER_PORTS:
+                        banner = self._grab_banner(conn)
+                    entry = {"port": f"{port}/tcp", "state": "open", "service": service}
+                    if banner:
+                        entry["banner"] = banner
+                    open_ports.append(entry)
             except (socket.timeout, ConnectionRefusedError, OSError):
                 pass
 
@@ -106,6 +177,334 @@ class SecurityTools:
             "output": "\n".join(output_lines),
             "open_ports": open_ports,
             "note": "nmap unavailable — used socket scanner (no version detection)",
+        }
+
+    @staticmethod
+    def _grab_banner(conn: socket.socket, max_bytes: int = 256) -> str:
+        """Read an initial service banner. Returns a single trimmed line, or ''."""
+        try:
+            conn.settimeout(2.0)
+            data = conn.recv(max_bytes)
+            if not data:
+                return ""
+            line = data.decode("latin-1", errors="replace").strip()
+            return line.splitlines()[0][:200] if line else ""
+        except (socket.timeout, OSError):
+            return ""
+
+    # ------------------------------------------------------------------
+    # HTTP fingerprinting & web-layer assessment
+    # ------------------------------------------------------------------
+
+    def http_fingerprint(self, target: str, timeout: float = 10.0) -> Dict[str, Any]:
+        """
+        Identify a web server: status, server banner, page title, and detected
+        technologies (from headers and cookies). Tries HTTPS then HTTP.
+        """
+        if not _validate_target(target.replace("http://", "").replace("https://", "").split("/")[0]):
+            return {"status": "error", "tool": "http_fingerprint", "message": "Invalid target format"}
+
+        last_error = None
+        for prefer_https in (True, False):
+            url = _normalize_url(target, prefer_https=prefer_https)
+            try:
+                resp = requests.get(
+                    url, timeout=timeout, allow_redirects=True,
+                    verify=False, headers={"User-Agent": "SecureFlow-Scanner/1.0"},
+                )
+            except _NET_ERRORS as exc:
+                last_error = str(exc)
+                continue
+
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            cookies = "; ".join(c.name for c in resp.cookies).lower()
+            technologies = self._detect_technologies(headers, cookies)
+
+            title = ""
+            match = re.search(r"<title[^>]*>(.*?)</title>", resp.text or "", re.IGNORECASE | re.DOTALL)
+            if match:
+                title = re.sub(r"\s+", " ", match.group(1)).strip()[:200]
+
+            return {
+                "status": "success",
+                "tool": "http_fingerprint",
+                "target": target,
+                "final_url": resp.url,
+                "http_status": resp.status_code,
+                "server": resp.headers.get("Server", "unknown"),
+                "powered_by": resp.headers.get("X-Powered-By", ""),
+                "title": title,
+                "technologies": technologies,
+                "content_length": len(resp.content),
+            }
+
+        return {
+            "status": "error", "tool": "http_fingerprint",
+            "target": target, "message": f"No HTTP(S) response: {last_error}",
+        }
+
+    @staticmethod
+    def _detect_technologies(headers: Dict[str, str], cookies: str) -> List[str]:
+        """Match header/cookie signatures to technology names."""
+        found = set()
+        for hdr in ("server", "x-powered-by"):
+            value = headers.get(hdr, "").lower()
+            for needle, name in _TECH_SIGNATURES.get(hdr, {}).items():
+                if needle in value:
+                    found.add(name)
+        for needle, name in _TECH_SIGNATURES["cookie"].items():
+            if needle in cookies:
+                found.add(name)
+        if "x-aspnet-version" in headers:
+            found.add("ASP.NET")
+        if "x-drupal-cache" in headers:
+            found.add("Drupal")
+        return sorted(found)
+
+    def http_security_headers(self, target: str, timeout: float = 10.0) -> Dict[str, Any]:
+        """Audit a site's HTTP security headers and report which are missing."""
+        if not _validate_target(target.replace("http://", "").replace("https://", "").split("/")[0]):
+            return {"status": "error", "tool": "security_headers", "message": "Invalid target format"}
+
+        last_error = None
+        for prefer_https in (True, False):
+            url = _normalize_url(target, prefer_https=prefer_https)
+            try:
+                resp = requests.get(
+                    url, timeout=timeout, allow_redirects=True,
+                    verify=False, headers={"User-Agent": "SecureFlow-Scanner/1.0"},
+                )
+            except _NET_ERRORS as exc:
+                last_error = str(exc)
+                continue
+
+            present, missing = {}, []
+            lower = {k.lower(): v for k, v in resp.headers.items()}
+            for header, why in _SECURITY_HEADERS.items():
+                if header.lower() in lower:
+                    present[header] = lower[header.lower()]
+                else:
+                    missing.append({"header": header, "risk": why})
+
+            total = len(_SECURITY_HEADERS)
+            grade_pct = int(len(present) / total * 100)
+            return {
+                "status": "success",
+                "tool": "security_headers",
+                "target": target,
+                "final_url": resp.url,
+                "present": present,
+                "missing": missing,
+                "score": f"{len(present)}/{total}",
+                "grade_pct": grade_pct,
+            }
+
+        return {
+            "status": "error", "tool": "security_headers",
+            "target": target, "message": f"No HTTP(S) response: {last_error}",
+        }
+
+    @staticmethod
+    def _resolve_base_url(target: str, timeout: float = 6.0) -> str:
+        """Return a reachable http(s):// base URL, trying HTTPS then HTTP."""
+        if target.startswith(("http://", "https://")):
+            return target.rstrip("/")
+        for prefer_https in (True, False):
+            url = _normalize_url(target, prefer_https=prefer_https)
+            try:
+                requests.get(url, timeout=timeout, allow_redirects=True, verify=False,
+                             headers={"User-Agent": "SecureFlow-Scanner/1.0"})
+                return url.rstrip("/")
+            except _NET_ERRORS:
+                continue
+        return ""
+
+    def probe_paths(self, target: str, timeout: float = 6.0) -> Dict[str, Any]:
+        """Probe common sensitive paths. Reports any that are reachable (read-only GET)."""
+        if not _validate_target(target.replace("http://", "").replace("https://", "").split("/")[0]):
+            return {"status": "error", "tool": "probe_paths", "message": "Invalid target format"}
+
+        base = self._resolve_base_url(target, timeout=timeout)
+        if not base:
+            return {"status": "error", "tool": "probe_paths", "target": target,
+                    "message": "No reachable HTTP(S) service"}
+        exposed = []
+        checked = 0
+        for path in _SENSITIVE_PATHS:
+            checked += 1
+            try:
+                resp = requests.get(
+                    base + path, timeout=timeout, allow_redirects=False,
+                    verify=False, headers={"User-Agent": "SecureFlow-Scanner/1.0"},
+                )
+            except _NET_ERRORS:
+                continue
+            # 200 = exposed; 401/403 = exists but protected (still informative)
+            if resp.status_code in (200, 401, 403):
+                exposed.append({
+                    "path": path,
+                    "status": resp.status_code,
+                    "length": len(resp.content),
+                    "note": "ACCESSIBLE" if resp.status_code == 200 else "exists (protected)",
+                })
+
+        return {
+            "status": "success",
+            "tool": "probe_paths",
+            "target": target,
+            "paths_checked": checked,
+            "findings": exposed,
+            "exposed_count": len([e for e in exposed if e["status"] == 200]),
+        }
+
+    # ------------------------------------------------------------------
+    # TLS / SSL certificate inspection
+    # ------------------------------------------------------------------
+
+    def tls_inspect(self, target: str, port: int = 443, timeout: float = 10.0) -> Dict[str, Any]:
+        """
+        Inspect a TLS endpoint: certificate subject/issuer/validity, negotiated
+        protocol & cipher, and common weaknesses (expired, self-signed, weak proto).
+        """
+        host = target.replace("https://", "").replace("http://", "").split("/")[0]
+        if ":" in host and not host.startswith("["):
+            host, _, maybe_port = host.partition(":")
+            if maybe_port.isdigit():
+                port = int(maybe_port)
+        if not _validate_target(host):
+            return {"status": "error", "tool": "tls_inspect", "message": "Invalid target format"}
+
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE  # we inspect the cert ourselves
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                    der = ssock.getpeercert(binary_form=True)
+                    protocol = ssock.version()
+                    cipher = ssock.cipher()
+        except (socket.timeout, socket.gaierror, ConnectionRefusedError,
+                OSError, ssl.SSLError, UnicodeError) as exc:
+            return {"status": "error", "tool": "tls_inspect", "target": target,
+                    "message": f"TLS connection failed: {exc}"}
+
+        info = self._parse_certificate(der)
+        warnings = []
+        if protocol in ("SSLv2", "SSLv3", "TLSv1", "TLSv1.1"):
+            warnings.append(f"Weak/outdated protocol negotiated: {protocol}")
+        if info.get("expired"):
+            warnings.append("Certificate is EXPIRED")
+        if info.get("days_until_expiry") is not None and 0 <= info["days_until_expiry"] <= 30:
+            warnings.append(f"Certificate expires soon ({info['days_until_expiry']} days)")
+        if info.get("self_signed"):
+            warnings.append("Certificate appears self-signed")
+
+        return {
+            "status": "success",
+            "tool": "tls_inspect",
+            "target": target,
+            "port": port,
+            "protocol": protocol,
+            "cipher": cipher[0] if cipher else None,
+            "certificate": info,
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _parse_certificate(der_bytes: bytes) -> Dict[str, Any]:
+        """Parse a DER certificate via the cryptography library."""
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.backends import default_backend
+            from datetime import datetime, timezone
+        except ImportError:
+            return {"error": "cryptography library not available"}
+
+        try:
+            cert = x509.load_der_x509_certificate(der_bytes, default_backend())
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"could not parse certificate: {exc}"}
+
+        def _name(name) -> str:
+            try:
+                return name.rfc4514_string()
+            except Exception:  # noqa: BLE001
+                return str(name)
+
+        try:
+            not_after = cert.not_valid_after_utc
+            not_before = cert.not_valid_before_utc
+        except AttributeError:  # older cryptography
+            from datetime import timezone as _tz
+            not_after = cert.not_valid_after.replace(tzinfo=_tz.utc)
+            not_before = cert.not_valid_before.replace(tzinfo=_tz.utc)
+
+        now = datetime.now(timezone.utc)
+        days_left = (not_after - now).days
+
+        sans = []
+        try:
+            ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            sans = ext.value.get_values_for_type(x509.DNSName)
+        except Exception:  # noqa: BLE001
+            pass
+
+        subject = _name(cert.subject)
+        issuer = _name(cert.issuer)
+        return {
+            "subject": subject,
+            "issuer": issuer,
+            "self_signed": subject == issuer,
+            "not_before": not_before.isoformat(),
+            "not_after": not_after.isoformat(),
+            "expired": now > not_after,
+            "days_until_expiry": days_left,
+            "serial": str(cert.serial_number),
+            "subject_alt_names": sans[:20],
+        }
+
+    # ------------------------------------------------------------------
+    # DNS enumeration
+    # ------------------------------------------------------------------
+
+    def dns_enum(self, domain: str) -> Dict[str, Any]:
+        """Enumerate DNS records (A, AAAA, MX, NS, TXT, CNAME, SOA) for a domain."""
+        host = domain.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+        if not _validate_target(host):
+            return {"status": "error", "tool": "dns_enum", "message": "Invalid domain format"}
+
+        try:
+            import dns.resolver
+        except ImportError:
+            return {"status": "error", "tool": "dns_enum",
+                    "message": "dnspython not installed (pip install dnspython)"}
+
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = 5.0
+        resolver.lifetime = 5.0
+
+        records: Dict[str, Any] = {}
+        for rtype in ("A", "AAAA", "MX", "NS", "TXT", "CNAME", "SOA"):
+            try:
+                answers = resolver.resolve(host, rtype)
+                records[rtype] = [r.to_text() for r in answers]
+            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+                continue
+            except (dns.resolver.NoNameservers, dns.exception.Timeout) as exc:
+                records.setdefault("_errors", []).append(f"{rtype}: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                records.setdefault("_errors", []).append(f"{rtype}: {exc}")
+
+        if not records or (len(records) == 1 and "_errors" in records):
+            return {"status": "error", "tool": "dns_enum", "domain": host,
+                    "message": "No DNS records resolved", "details": records.get("_errors", [])}
+
+        return {
+            "status": "success",
+            "tool": "dns_enum",
+            "domain": host,
+            "records": records,
+            "record_types_found": [k for k in records if not k.startswith("_")],
         }
 
     def parse_nmap_output(self, nmap_output: str) -> List[Dict[str, str]]:
@@ -230,6 +629,14 @@ class SecurityTools:
 
 security_tools = SecurityTools()
 
+# We intentionally connect to untrusted/self-signed pentest targets with
+# verify=False; silence the resulting urllib3 warning to keep agent logs clean.
+try:
+    from urllib3.exceptions import InsecureRequestWarning
+    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+except Exception:  # noqa: BLE001
+    pass
+
 @tool("Run Nmap Scan")
 def run_nmap_scan(target: str) -> str:
     """Execute nmap scan to discover open ports and services on target."""
@@ -246,6 +653,41 @@ def lookup_cves(product: str) -> str:
 def assess_service(port: str, service: str) -> str:
     """Assess vulnerability risk level of a service running on a specific port."""
     result = security_tools.assess_vulnerability(port, service)
+    return json.dumps(result, indent=2)
+
+@tool("HTTP Fingerprint")
+def http_fingerprint(target: str) -> str:
+    """Fingerprint a web server: HTTP status, server banner, page title, and detected
+    technologies (CMS, frameworks, languages) from response headers and cookies."""
+    result = security_tools.http_fingerprint(target)
+    return json.dumps(result, indent=2)
+
+@tool("Audit HTTP Security Headers")
+def audit_security_headers(target: str) -> str:
+    """Audit a website's HTTP security headers (HSTS, CSP, X-Frame-Options, etc.)
+    and report which protective headers are missing and the associated risk."""
+    result = security_tools.http_security_headers(target)
+    return json.dumps(result, indent=2)
+
+@tool("Probe Sensitive Paths")
+def probe_sensitive_paths(target: str) -> str:
+    """Probe a web server for commonly-exposed sensitive paths (/.git, /.env, backups,
+    admin panels, actuator endpoints). Reports any that are accessible or protected."""
+    result = security_tools.probe_paths(target)
+    return json.dumps(result, indent=2)
+
+@tool("Inspect TLS Certificate")
+def inspect_tls(target: str) -> str:
+    """Inspect a TLS/SSL endpoint: certificate subject/issuer/validity, negotiated
+    protocol and cipher, and weaknesses (expired, self-signed, outdated TLS)."""
+    result = security_tools.tls_inspect(target)
+    return json.dumps(result, indent=2)
+
+@tool("DNS Enumeration")
+def dns_enumerate(domain: str) -> str:
+    """Enumerate DNS records (A, AAAA, MX, NS, TXT, CNAME, SOA) for a domain to map
+    its infrastructure, mail servers, and name servers."""
+    result = security_tools.dns_enum(domain)
     return json.dumps(result, indent=2)
 
 

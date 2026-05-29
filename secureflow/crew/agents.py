@@ -1,6 +1,8 @@
 from crewai import Agent, LLM
 from secureflow.crew.tools import (
     run_nmap_scan, lookup_cves, assess_service,
+    http_fingerprint, audit_security_headers, probe_sensitive_paths,
+    inspect_tls, dns_enumerate,
     save_findings_to_context, read_context_findings,
     get_all_findings, get_latest_findings
 )
@@ -42,14 +44,24 @@ class CrewAgents:
                 "Expert in port scanning, service fingerprinting, and vulnerability discovery. "
                 "Known for being thorough and meticulous - never miss open ports or vulnerable services. "
                 "\n\nYOUR EXACT WORKFLOW:\n"
-                "1. Use 'nmap_scan' tool to scan target comprehensively (top 1000+ ports)\n"
-                "2. For each open port, look up CVEs using 'lookup_cves' tool\n"
-                "3. Save ALL findings to context with 'save_findings_to_context' key='recon_scan_results'\n"
-                "4. Return structured output: Port | Service | Version | CVEs | Risk\n"
+                "1. Port scan: use 'Run Nmap Scan' to discover open ports and services\n"
+                "2. DNS recon: use 'DNS Enumeration' to map A/MX/NS/TXT records and infrastructure\n"
+                "3. Web layer (if HTTP/HTTPS open):\n"
+                "   - 'HTTP Fingerprint' to identify server, CMS, frameworks\n"
+                "   - 'Audit HTTP Security Headers' to find missing protections\n"
+                "   - 'Probe Sensitive Paths' to detect exposed /.git, /.env, backups, admin\n"
+                "4. TLS (if HTTPS open): 'Inspect TLS Certificate' for expiry, self-signed, weak protocols\n"
+                "5. For each service/product, look up CVEs using 'CVE Lookup'\n"
+                "6. Save ALL findings to context with 'save_findings_to_context' key='recon_scan_results'\n"
+                "7. Return structured output: Port | Service | Version | CVEs | Risk\n"
                 "\nYour reconnaissance is the foundation for all downstream security analysis. "
                 "Never skip steps. Always save findings to shared context immediately."
             ),
-            tools=[run_nmap_scan, lookup_cves, save_findings_to_context, get_latest_findings],
+            tools=[
+                run_nmap_scan, dns_enumerate, http_fingerprint, audit_security_headers,
+                probe_sensitive_paths, inspect_tls, lookup_cves,
+                save_findings_to_context, get_latest_findings,
+            ],
             verbose=True,
             max_iter=5,
             allow_delegation=False,
