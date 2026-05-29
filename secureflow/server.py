@@ -20,6 +20,15 @@ from secureflow.crew.tasks import create_crew
 
 # Active scan registry: scan_id → {status, target, result}
 _active_scans: dict = {}
+_ACTIVE_SCANS_MAX = 500
+
+
+def _register_scan(scan_id: str, info: dict) -> None:
+    """Add/update a scan entry, evicting oldest entries when limit is reached."""
+    _active_scans[scan_id] = info
+    if len(_active_scans) > _ACTIVE_SCANS_MAX:
+        oldest = next(iter(_active_scans))
+        _active_scans.pop(oldest, None)
 
 # OpenCode process tracker for start/stop control
 _opencode_process: Any = None
@@ -86,7 +95,7 @@ async def run_security_crew(target: str) -> dict:
         dict with status, scan_id, findings, session log
     """
     scan_id = str(uuid.uuid4())
-    _active_scans[scan_id] = {"status": "running", "target": target}
+    _register_scan(scan_id, {"status": "running", "target": target})
     logger.info(f"🚀 Starting security crew for target: {target} (scan_id={scan_id})")
 
     try:
@@ -94,7 +103,7 @@ async def run_security_crew(target: str) -> dict:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, orchestrator.run_security_crew, target)
 
-        _active_scans[scan_id] = {"status": "complete", "target": target}
+        _register_scan(scan_id, {"status": "complete", "target": target})
         return {
             "status": "success" if result.get("success") else "error",
             "scan_id": scan_id,
@@ -106,7 +115,7 @@ async def run_security_crew(target: str) -> dict:
 
     except Exception as e:
         logger.error(f"Security crew failed: {str(e)}", exc_info=True)
-        _active_scans[scan_id] = {"status": "error", "target": target, "error": str(e)}
+        _register_scan(scan_id, {"status": "error", "target": target, "error": str(e)})
         return {
             "status": "error",
             "scan_id": scan_id,
@@ -328,8 +337,18 @@ async def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_out
     Returns:
         dict with status, scan_id, architecture, code, review findings, and output directory
     """
+    from pathlib import Path
+    _ALLOWED_OUTPUT_PREFIXES = ("/tmp/",)
+    resolved_output = str(Path(output_dir).resolve())
+    if not any(resolved_output.startswith(p) for p in _ALLOWED_OUTPUT_PREFIXES):
+        return {
+            "status": "error",
+            "error": "output_dir must be under /tmp/",
+            "message": "Invalid output directory"
+        }
+
     scan_id = str(uuid.uuid4())
-    _active_scans[scan_id] = {"status": "running", "task": task}
+    _register_scan(scan_id, {"status": "running", "task": task})
     logger.info(f"🚀 Starting development crew for task: {task} (scan_id={scan_id})")
 
     try:
@@ -337,7 +356,7 @@ async def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_out
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, orchestrator.run_dev_crew, task, language, output_dir)
 
-        _active_scans[scan_id] = {"status": "complete", "task": task}
+        _register_scan(scan_id, {"status": "complete", "task": task})
         return {
             "status": "success" if result.get("status") == "success" else "error",
             "scan_id": scan_id,
@@ -351,7 +370,7 @@ async def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_out
 
     except Exception as e:
         logger.error(f"Development crew failed: {str(e)}", exc_info=True)
-        _active_scans[scan_id] = {"status": "error", "task": task, "error": str(e)}
+        _register_scan(scan_id, {"status": "error", "task": task, "error": str(e)})
         return {
             "status": "error",
             "scan_id": scan_id,

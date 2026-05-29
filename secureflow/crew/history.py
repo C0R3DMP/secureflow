@@ -1,6 +1,7 @@
 """Persistent session history — survives process restarts."""
 
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,11 +14,12 @@ class SessionHistory:
 
     def __init__(self, db_path: str = _HISTORY_DB):
         self.db_path = db_path
+        self._lock = threading.RLock()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id           INTEGER  PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +43,7 @@ class SessionHistory:
     ) -> int:
         """Persist a completed session. Returns inserted row id."""
         ts = started_at or datetime.now().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 "INSERT INTO sessions (session_type, target, status, summary, started_at) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -56,7 +58,7 @@ class SessionHistory:
         session_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Return most recent sessions, newest first."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             if session_type:
                 cursor = conn.execute(
                     "SELECT id, session_type, target, status, summary, started_at, completed_at "
@@ -86,6 +88,6 @@ class SessionHistory:
 
     def clear(self) -> None:
         """Delete all session records (used in tests)."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM sessions")
             conn.commit()

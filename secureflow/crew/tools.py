@@ -1,6 +1,7 @@
 import socket
 import subprocess
 import json
+import threading
 import time
 import requests
 from typing import Dict, List, Any
@@ -28,8 +29,8 @@ class SecurityTools:
     """Security scanning and lookup tools for the crew."""
 
     def __init__(self):
-        self.cve_cache = {}
-        self.last_api_call = 0
+        self.cve_cache: Dict[str, Any] = {}
+        self._cache_lock = threading.Lock()
 
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
@@ -127,14 +128,14 @@ class SecurityTools:
     def lookup_cve(self, product: str, version: str = "") -> Dict[str, Any]:
         """
         Look up CVEs for a product/version via NVD API.
-        Includes rate limiting (3s between requests).
+        Includes rate limiting (3s between requests) and thread-safe cache.
         """
         cache_key = f"{product}:{version}"
-        if cache_key in self.cve_cache:
-            return self.cve_cache[cache_key]
+        with self._cache_lock:
+            if cache_key in self.cve_cache:
+                return self.cve_cache[cache_key]
 
         time.sleep(3)
-        self.last_api_call = time.time()
 
         try:
             keyword = f"{product} {version}".strip() if version else product
@@ -168,7 +169,8 @@ class SecurityTools:
                         for v in vulns
                     ]
                 }
-                self.cve_cache[cache_key] = result
+                with self._cache_lock:
+                    self.cve_cache[cache_key] = result
                 return result
             else:
                 return {

@@ -181,32 +181,32 @@ class SharedContext:
                 conn.commit()
 
     def export_summary(self) -> str:
-        """Export a summary of all agent findings."""
-        summary = "=== CREW COLLABORATION SUMMARY ===\n\n"
+        """Export a summary of all agent findings (acquired under lock for consistency)."""
+        with self.lock:
+            summary = "=== CREW COLLABORATION SUMMARY ===\n\n"
 
-        # Agent statuses
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT agent_name, status, phase FROM metadata")
-            summary += "AGENT STATUS:\n"
-            for agent_name, status, phase in cursor.fetchall():
-                summary += f"  {agent_name}: {status} (phase: {phase})\n"
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("SELECT agent_name, status, phase FROM metadata")
+                summary += "AGENT STATUS:\n"
+                for agent_name, status, phase in cursor.fetchall():
+                    summary += f"  {agent_name}: {status} (phase: {phase})\n"
 
-        summary += "\nAGENT FINDINGS:\n"
-        for agent in ["recon", "analyst", "reporter"]:
-            findings = self.get_all(agent)
-            if findings:
-                summary += f"\n{agent.upper()}:\n"
-                for key, value in findings.items():
-                    if isinstance(value, (dict, list)):
-                        summary += f"  {key}: {json.dumps(value, indent=2)}\n"
-                    else:
-                        summary += f"  {key}: {value}\n"
+            summary += "\nAGENT FINDINGS:\n"
+            for agent in ["recon", "analyst", "reporter"]:
+                findings = self.get_all(agent)
+                if findings:
+                    summary += f"\n{agent.upper()}:\n"
+                    for key, value in findings.items():
+                        if isinstance(value, (dict, list)):
+                            summary += f"  {key}: {json.dumps(value, indent=2)}\n"
+                        else:
+                            summary += f"  {key}: {value}\n"
 
-        summary += "\nCONVERSATION LOG:\n"
-        for msg in self.get_conversation_log():
-            summary += (
-                f"  [{msg['timestamp']}] {msg['from']} → {msg['to']}: "
-                f"{msg['message'][:80]}...\n"
-            )
+            summary += "\nCONVERSATION LOG:\n"
+            for msg in self.get_conversation_log():
+                summary += (
+                    f"  [{msg['timestamp']}] {msg['from']} → {msg['to']}: "
+                    f"{msg['message'][:80]}...\n"
+                )
 
-        return summary
+            return summary

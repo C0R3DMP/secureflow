@@ -36,9 +36,10 @@ class ReportExporter:
         raise ValueError(f"Unsupported format: {fmt!r}. Choose html, pdf, or json.")
 
     def to_html(self, result: Dict[str, Any], target: str) -> str:
-        """Save (or reuse) the HTML report. Returns file path."""
+        """Save HTML report. Falls back to escaped minimal template when no AI HTML."""
         html_content = result.get("report_html", "")
         if not html_content:
+            # Use escaped template — never write raw AI output as HTML without escaping
             html_content = self._minimal_html(target, result.get("result", "No content"))
 
         path = self.output_dir / f"report_{_report_stem(target)}.html"

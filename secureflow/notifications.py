@@ -83,14 +83,22 @@ class NotificationDispatcher:
             logger.warning(f"Webhook delivery failed: {exc}")
 
     def _send_telegram(self, payload: Dict[str, Any]) -> None:
+        def _escape(text: str) -> str:
+            """Escape Telegram Markdown v1 special characters."""
+            for ch in ("_", "*", "`", "["):
+                text = text.replace(ch, f"\\{ch}")
+            return text
+
+        safe_target = _escape(str(payload["target"]))
         text = (
             f"🤖 *SecureFlow* — {payload['event']}\n"
-            f"Target: `{payload['target']}`\n"
+            f"Target: `{safe_target}`\n"
             f"Status: {payload['status']}\n"
             f"Time: {payload['timestamp']}"
         )
         if payload.get("summary"):
-            text += f"\n\n_{payload['summary'][:200]}_"
+            safe_summary = _escape(str(payload["summary"])[:200])
+            text += f"\n\n_{safe_summary}_"
 
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
         try:
