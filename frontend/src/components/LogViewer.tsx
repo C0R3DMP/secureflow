@@ -1,12 +1,15 @@
 import { useEffect, useRef } from 'react'
 import type { LogEntry } from '../types'
-import clsx from 'clsx'
 
-const levelColors = {
-  info: 'text-blue-400 bg-blue-500/10',
-  warning: 'text-yellow-400 bg-yellow-500/10',
-  error: 'text-red-400 bg-red-500/10',
-  success: 'text-green-400 bg-green-500/10',
+const LEVEL_CFG = {
+  info:    { color: 'var(--cyan)',  prefix: 'INFO ', glow: 'rgba(0,240,255,0.25)' },
+  warning: { color: 'var(--amber)', prefix: 'WARN ', glow: 'rgba(255,179,0,0.25)' },
+  error:   { color: 'var(--pink)',  prefix: 'ERR  ', glow: 'rgba(255,0,122,0.25)' },
+  success: { color: 'var(--green)', prefix: 'OK   ', glow: 'rgba(0,255,110,0.25)' },
+}
+
+function formatTime(d: Date) {
+  return d.toLocaleTimeString('en-US', { hour12: false })
 }
 
 interface LogViewerProps {
@@ -25,31 +28,57 @@ export function LogViewer({ logs }: LogViewerProps) {
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto p-3 bg-card/50 rounded-lg border border-border font-mono text-xs"
+      className="flex-1 overflow-y-auto"
+      style={{
+        fontFamily: 'var(--font-mono)',
+        fontSize: '0.67rem',
+        lineHeight: 1.6,
+        background: 'rgba(0,0,0,0.4)',
+        border: '1px solid var(--border-dim)',
+        padding: '0.5rem',
+      }}
     >
       {logs.length === 0 ? (
-        <div className="text-muted-foreground text-center py-8">
-          No logs yet
+        <div style={{ color: 'var(--text-dim)', textAlign: 'center', padding: '2rem', letterSpacing: '0.1em' }}>
+          — NO LOG ENTRIES —
         </div>
       ) : (
-        <div className="space-y-1">
-          {logs.map((log) => (
+        logs.map((log) => {
+          const cfg = LEVEL_CFG[log.level]
+          return (
             <div
               key={log.id}
-              className={clsx(
-                'px-2 py-1 rounded flex gap-3 items-start',
-                levelColors[log.level],
-              )}
+              className="new-msg"
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                padding: '0.1rem 0.25rem',
+                borderRadius: '1px',
+              }}
             >
-              <span className="text-muted-foreground shrink-0">
-                [{log.timestamp.toLocaleTimeString()}]
+              <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
+                [{formatTime(log.timestamp)}]
               </span>
-              <span className="font-bold shrink-0 w-10">
-                {log.level.toUpperCase()}
+              <span style={{
+                color: cfg.color,
+                flexShrink: 0,
+                textShadow: `0 0 6px ${cfg.glow}`,
+                fontWeight: 700,
+                minWidth: '3.5rem',
+              }}>
+                {cfg.prefix}
               </span>
-              <span className="flex-1 break-words">{log.message}</span>
+              <span style={{ color: 'var(--text-primary)', wordBreak: 'break-word', flex: 1 }}>
+                {log.message}
+              </span>
             </div>
-          ))}
+          )
+        })
+      )}
+      {/* Blinking cursor at end */}
+      {logs.length > 0 && (
+        <div style={{ color: 'var(--cyan)', display: 'inline' }}>
+          <span className="cb-cursor" />
         </div>
       )}
     </div>
