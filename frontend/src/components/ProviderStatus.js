@@ -1,19 +1,24 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { CheckCircle2, AlertCircle, XCircle, RefreshCw, Play, Square } from 'lucide-react';
-import { Badge } from './Badge';
-import clsx from 'clsx';
 import { useState } from 'react';
-const providerEmojis = {
-    claude: '🤖',
-    gemini: '✨',
-    openrouter: '🌐',
-    ollama: '🦙',
-    opencode: '💻',
+const PROVIDER_GLYPHS = {
+    claude: '◈',
+    gemini: '◆',
+    openrouter: '○',
+    ollama: '◉',
+    opencode: '▣',
 };
+const PRIORITY_LABEL = ['', 'PRIMARY', 'SECONDARY', 'TERTIARY', 'FALLBACK'];
+function dotClass(status) {
+    if (status === 'available')
+        return 'ok';
+    if (status === 'limited')
+        return 'warn';
+    return 'off';
+}
 export function ProviderStatus({ providers, onTest }) {
     const [testing, setTesting] = useState(null);
-    const [_starting, setStarting] = useState(false);
-    const [_stopping, setStopping] = useState(false);
+    const [starting, setStarting] = useState(false);
+    const [stopping, setStopping] = useState(false);
     const handleTest = async (name) => {
         setTesting(name);
         onTest?.(name);
@@ -25,9 +30,6 @@ export function ProviderStatus({ providers, onTest }) {
             await fetch('/api/opencode/start', { method: 'POST' });
             setTimeout(() => window.location.reload(), 1000);
         }
-        catch {
-            alert('Failed to start OpenCode server');
-        }
         finally {
             setStarting(false);
         }
@@ -38,20 +40,57 @@ export function ProviderStatus({ providers, onTest }) {
             await fetch('/api/opencode/stop', { method: 'POST' });
             setTimeout(() => window.location.reload(), 1000);
         }
-        catch {
-            alert('Failed to stop OpenCode server');
-        }
         finally {
             setStopping(false);
         }
     };
-    return (_jsx("div", { className: "space-y-2", children: providers.map((provider) => (_jsxs("div", { className: clsx('flex items-center justify-between p-3 rounded-lg border transition-colors', provider.status === 'available'
-                ? 'border-success/30 bg-success/5'
-                : provider.status === 'limited'
-                    ? 'border-yellow-500/30 bg-yellow-500/5'
-                    : 'border-destructive/30 bg-destructive/5'), children: [_jsxs("div", { className: "flex items-center gap-3", children: [_jsx("span", { className: "text-lg", children: providerEmojis[provider.name] }), _jsxs("div", { children: [_jsxs("p", { className: "text-sm font-semibold capitalize text-foreground", children: [provider.name, provider.mode && (_jsxs("span", { className: "text-xs font-normal ml-2 text-muted-foreground", children: ["(", provider.mode, ")"] }))] }), _jsxs("p", { className: "text-xs text-muted-foreground", children: ["Priority: #", provider.priority] })] })] }), _jsxs("div", { className: "flex items-center gap-2", children: [provider.status === 'available' && (_jsx(CheckCircle2, { className: "h-5 w-5 text-success" })), provider.status === 'limited' && (_jsx(AlertCircle, { className: "h-5 w-5 text-yellow-500" })), provider.status === 'unavailable' && (_jsx(XCircle, { className: "h-5 w-5 text-destructive" })), _jsx(Badge, { variant: provider.status === 'available'
-                                ? 'success'
-                                : provider.status === 'limited'
-                                    ? 'warning'
-                                    : 'destructive', children: provider.status }), _jsx("button", { onClick: () => handleTest(provider.name), disabled: testing === provider.name, className: clsx('p-1 rounded hover:bg-primary/20 transition-colors disabled:opacity-50', testing === provider.name && 'animate-spin'), title: "Test connection", children: _jsx(RefreshCw, { className: "h-4 w-4" }) }), provider.name === 'opencode' && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: handleStartOpenCode, disabled: _starting, className: "p-1 rounded hover:bg-green-500/20 transition-colors disabled:opacity-50", title: "Start OpenCode", children: _jsx(Play, { className: "h-4 w-4 text-green-400" }) }), _jsx("button", { onClick: handleStopOpenCode, disabled: _stopping, className: "p-1 rounded hover:bg-red-500/20 transition-colors disabled:opacity-50", title: "Stop OpenCode", children: _jsx(Square, { className: "h-4 w-4 text-red-400" }) })] }))] })] }, provider.name))) }));
+    return (_jsx("div", { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' }, children: providers.map((p) => {
+            const glyph = PROVIDER_GLYPHS[p.name] ?? '◌';
+            const isAvail = p.status === 'available';
+            const isLimited = p.status === 'limited';
+            const nodeColor = isAvail ? 'var(--green)' : isLimited ? 'var(--amber)' : 'var(--text-dim)';
+            const borderColor = isAvail
+                ? 'rgba(0,255,110,0.2)'
+                : isLimited
+                    ? 'rgba(255,179,0,0.2)'
+                    : 'var(--border-dim)';
+            return (_jsxs("div", { style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.35rem 0.5rem',
+                    border: `1px solid ${borderColor}`,
+                    background: isAvail
+                        ? 'rgba(0,255,110,0.03)'
+                        : isLimited
+                            ? 'rgba(255,179,0,0.03)'
+                            : 'transparent',
+                    transition: 'all 0.2s',
+                }, children: [_jsx("span", { className: `status-dot ${dotClass(p.status)}` }), _jsx("span", { style: {
+                            color: nodeColor,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.85rem',
+                            width: '14px',
+                            textAlign: 'center',
+                            flexShrink: 0,
+                            textShadow: isAvail ? `0 0 6px ${nodeColor}` : 'none',
+                        }, children: glyph }), _jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [_jsxs("div", { style: {
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: '0.62rem',
+                                    fontWeight: 700,
+                                    letterSpacing: '0.12em',
+                                    color: isAvail ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                    textTransform: 'uppercase',
+                                }, children: [p.name, p.mode && (_jsxs("span", { style: { fontWeight: 400, marginLeft: '0.4rem', color: 'var(--text-dim)', fontSize: '0.55rem' }, children: ["[", p.mode, "]"] }))] }), _jsx("div", { style: {
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: '0.52rem',
+                                    color: 'var(--text-dim)',
+                                    letterSpacing: '0.08em',
+                                }, children: PRIORITY_LABEL[p.priority] ?? `P${p.priority}` })] }), _jsxs("div", { style: { display: 'flex', gap: '0.2rem', flexShrink: 0 }, children: [_jsx("button", { className: "cb-icon-btn", onClick: () => handleTest(p.name), disabled: testing === p.name, title: "Test connection", style: {
+                                    width: '1.6rem',
+                                    height: '1.6rem',
+                                    fontSize: '0.7rem',
+                                    animation: testing === p.name ? 'spin-ring 1s linear infinite' : 'none',
+                                }, children: "\u21BB" }), p.name === 'opencode' && (_jsxs(_Fragment, { children: [_jsx("button", { className: "cb-icon-btn", onClick: handleStartOpenCode, disabled: starting, title: "Start OpenCode", style: { width: '1.6rem', height: '1.6rem', fontSize: '0.7rem', color: 'var(--green)' }, children: "\u25B6" }), _jsx("button", { className: "cb-icon-btn", onClick: handleStopOpenCode, disabled: stopping, title: "Stop OpenCode", style: { width: '1.6rem', height: '1.6rem', fontSize: '0.7rem', color: 'var(--pink)' }, children: "\u25A0" })] }))] })] }, p.name));
+        }) }));
 }
