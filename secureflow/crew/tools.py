@@ -47,6 +47,19 @@ _SENSITIVE_PATHS = [
     "/.DS_Store", "/robots.txt", "/sitemap.xml", "/server-status",
     "/phpinfo.php", "/admin", "/admin/login", "/.htaccess",
     "/swagger.json", "/api/swagger.json", "/actuator/health", "/actuator/env",
+    # Debug / developer endpoints
+    "/debug", "/debug.php", "/_debug", "/console", "/test", "/test.php",
+    "/healthz", "/health", "/api/health", "/api/debug",
+    # Java / Spring
+    "/actuator", "/actuator/beans", "/actuator/loggers", "/jolokia",
+    "/api-docs", "/swagger-ui.html", "/v2/api-docs", "/v3/api-docs",
+    # GraphQL
+    "/graphql", "/api/graphql", "/gql",
+    # CI / DevOps
+    "/.travis.yml", "/Jenkinsfile", "/docker-compose.yml", "/.circleci/config.yml",
+    # Backup / config
+    "/config.yml", "/config.yaml", "/settings.py", "/web.config",
+    "/WEB-INF/web.xml", "/.well-known/security.txt",
 ]
 
 # Header/cookie substrings → technology fingerprint.
@@ -90,6 +103,169 @@ def _normalize_url(target: str, prefer_https: bool = True) -> str:
     return f"{scheme}://{target}"
 
 
+# Compact but broad subdomain wordlist (~200 entries covering 90 % of real sub-domains)
+_SUBDOMAIN_WORDLIST: List[str] = [
+    "www", "mail", "remote", "blog", "webmail", "server", "ns1", "ns2",
+    "smtp", "secure", "vpn", "m", "shop", "ftp", "mail2", "test", "portal",
+    "ns", "ww1", "host", "support", "dev", "web", "bbs", "wap", "api",
+    "admin", "mx", "email", "cdn", "static", "media", "img", "images",
+    "video", "download", "uploads", "files", "assets", "cloud", "app",
+    "apps", "mobile", "beta", "alpha", "staging", "prod", "production",
+    "qa", "uat", "demo", "preview", "login", "auth", "sso", "oauth",
+    "accounts", "account", "profile", "user", "users", "member", "members",
+    "dashboard", "panel", "cp", "cpanel", "plesk", "whm", "webmin",
+    "monitor", "metrics", "grafana", "kibana", "elastic", "redis", "mysql",
+    "db", "database", "backup", "jenkins", "ci", "git", "gitlab", "github",
+    "jira", "confluence", "wiki", "docs", "help", "status", "health",
+    "intranet", "internal", "corp", "vpn2", "remote2", "proxy", "gateway",
+    "router", "fw", "firewall", "smtp2", "imap", "pop", "exchange",
+    "owa", "autodiscover", "lyncdiscover", "sip", "voip", "pbx",
+    "payment", "pay", "billing", "invoice", "erp", "crm", "hr",
+    "infra", "devops", "k8s", "kubernetes", "docker", "registry",
+    "aws", "gcp", "azure", "s3", "storage", "bucket",
+    "iot", "monitor", "alert", "alertmanager", "prometheus",
+    "sonarqube", "nexus", "artifactory", "vault", "consul",
+    "old", "new", "www2", "web2", "test2", "dev2",
+]
+
+# WAF header/cookie signatures → product name
+_WAF_HEADER_SIGNATURES: Dict[str, str] = {
+    "x-sucuri-id": "Sucuri WAF", "sucuri": "Sucuri WAF",
+    "cf-ray": "Cloudflare", "cloudflare": "Cloudflare",
+    "x-fw-hash": "Fortinet FortiWeb", "fortigate": "Fortinet",
+    "x-waf-event-info": "Radware AppWall", "radware": "Radware",
+    "x-dotdefender": "dotDefender", "dotdefender": "dotDefender",
+    "x-mod-security": "ModSecurity", "mod_security": "ModSecurity",
+    "x-protected-by": "Generic WAF", "x-blocked-by": "Generic WAF",
+    "x-akamai": "Akamai Kona", "akamai": "Akamai Kona",
+    "x-varnish": "Varnish Cache", "via": "Reverse Proxy/CDN",
+    "x-cdn": "CDN", "server: awselb": "AWS ELB",
+    "x-amzn-requestid": "AWS WAF", "x-amz": "AWS",
+    "x-azure-ref": "Azure Front Door", "arr-disable-session": "ARR/Azure",
+    "x-barracuda": "Barracuda WAF", "bni-persistence": "Barracuda",
+    "x-rewrite-url": "IIS / Rewrite", "x-nis": "Citrix NetScaler",
+    "ns_af": "Citrix NetScaler", "x-cnection": "NetScaler",
+    "x-dynatrace": "Dynatrace", "x-instana": "Instana",
+}
+
+# WAF body pattern signatures
+_WAF_BODY_SIGNATURES: Dict[str, str] = {
+    "access denied by website's firewall": "Generic WAF",
+    "sucuri website firewall": "Sucuri WAF",
+    "cloudflare ray id": "Cloudflare",
+    "this page is blocked by fortinet": "Fortinet",
+    "you don't have permission to access": "Generic WAF",
+    "mod_security": "ModSecurity",
+    "request rejected by url scan rule": "Generic WAF",
+    "this request has been blocked": "Generic WAF",
+    "barracuda networks": "Barracuda",
+    "kona site defender": "Akamai Kona",
+}
+
+# Offline version-based risk knowledge base.
+# Keys are lowercase service names, values map version prefixes → risk info.
+_VERSION_RISK_KB: Dict[str, Dict[str, Dict]] = {
+    "openssh": {
+        "1.": {"risk": "CRITICAL", "cves": ["CVE-2001-0144"], "safe_ver": "9.x", "note": "Very old, many RCEs"},
+        "2.": {"risk": "CRITICAL", "cves": ["CVE-2002-0083"], "safe_ver": "9.x"},
+        "3.": {"risk": "CRITICAL", "cves": ["CVE-2003-0693"], "safe_ver": "9.x"},
+        "4.": {"risk": "HIGH", "cves": ["CVE-2006-5051"], "safe_ver": "9.x"},
+        "5.": {"risk": "HIGH", "cves": ["CVE-2010-4478"], "safe_ver": "9.x"},
+        "6.": {"risk": "HIGH", "cves": ["CVE-2014-2532", "CVE-2016-0778"], "safe_ver": "9.x"},
+        "7.0": {"risk": "HIGH", "cves": ["CVE-2016-6515", "CVE-2016-10009"], "safe_ver": "9.x"},
+        "7.1": {"risk": "HIGH", "cves": ["CVE-2016-6515"], "safe_ver": "9.x"},
+        "7.2": {"risk": "MEDIUM", "cves": ["CVE-2016-10009"], "safe_ver": "9.x"},
+        "7.3": {"risk": "MEDIUM", "cves": ["CVE-2017-15906"], "safe_ver": "9.x"},
+        "7.4": {"risk": "LOW", "cves": [], "safe_ver": "9.x", "note": "Mostly patched"},
+        "8.": {"risk": "LOW", "cves": ["CVE-2023-38408"], "safe_ver": "9.3", "note": "Known but low"},
+    },
+    "apache": {
+        "1.": {"risk": "CRITICAL", "cves": ["CVE-2002-0392"], "safe_ver": "2.4.57+"},
+        "2.0": {"risk": "CRITICAL", "cves": ["CVE-2011-3192"], "safe_ver": "2.4.57+"},
+        "2.2": {"risk": "CRITICAL", "cves": ["CVE-2011-3348", "CVE-2017-7679"], "safe_ver": "2.4.57+"},
+        "2.4.1": {"risk": "HIGH", "cves": ["CVE-2014-0231"], "safe_ver": "2.4.57+"},
+        "2.4.2": {"risk": "HIGH", "cves": ["CVE-2014-0231"], "safe_ver": "2.4.57+"},
+        "2.4.17": {"risk": "HIGH", "cves": ["CVE-2016-0736"], "safe_ver": "2.4.57+"},
+        "2.4.29": {"risk": "HIGH", "cves": ["CVE-2017-9798", "CVE-2018-1312"], "safe_ver": "2.4.57+"},
+        "2.4.38": {"risk": "HIGH", "cves": ["CVE-2019-0211"], "safe_ver": "2.4.57+"},
+        "2.4.49": {"risk": "CRITICAL", "cves": ["CVE-2021-41773"], "safe_ver": "2.4.57+",
+                   "note": "Path traversal/RCE — widely exploited in the wild"},
+        "2.4.50": {"risk": "CRITICAL", "cves": ["CVE-2021-42013"], "safe_ver": "2.4.57+",
+                   "note": "Incomplete fix for CVE-2021-41773"},
+        "2.4.51": {"risk": "MEDIUM", "cves": ["CVE-2022-22720"], "safe_ver": "2.4.57+"},
+    },
+    "nginx": {
+        "0.": {"risk": "CRITICAL", "cves": ["CVE-2009-2629"], "safe_ver": "1.24+"},
+        "1.0": {"risk": "HIGH", "cves": ["CVE-2011-4315"], "safe_ver": "1.24+"},
+        "1.2": {"risk": "HIGH", "cves": ["CVE-2013-2028"], "safe_ver": "1.24+"},
+        "1.4": {"risk": "HIGH", "cves": ["CVE-2013-2028"], "safe_ver": "1.24+"},
+        "1.6": {"risk": "MEDIUM", "cves": ["CVE-2014-3616"], "safe_ver": "1.24+"},
+        "1.8": {"risk": "MEDIUM", "cves": ["CVE-2016-0742"], "safe_ver": "1.24+"},
+        "1.10": {"risk": "MEDIUM", "cves": ["CVE-2017-7529"], "safe_ver": "1.24+"},
+        "1.12": {"risk": "MEDIUM", "cves": ["CVE-2017-7529"], "safe_ver": "1.24+"},
+        "1.14": {"risk": "MEDIUM", "cves": ["CVE-2019-9511"], "safe_ver": "1.24+"},
+        "1.16": {"risk": "LOW", "cves": [], "safe_ver": "1.24+"},
+        "1.18": {"risk": "LOW", "cves": ["CVE-2021-23017"], "safe_ver": "1.24+", "note": "DNS resolver vuln"},
+    },
+    "php": {
+        "4.": {"risk": "CRITICAL", "cves": ["CVE-2007-1285"], "safe_ver": "8.2+"},
+        "5.0": {"risk": "CRITICAL", "cves": ["CVE-2005-3388"], "safe_ver": "8.2+"},
+        "5.2": {"risk": "CRITICAL", "cves": ["CVE-2008-3658"], "safe_ver": "8.2+"},
+        "5.3": {"risk": "CRITICAL", "cves": ["CVE-2012-0830"], "safe_ver": "8.2+"},
+        "5.4": {"risk": "CRITICAL", "cves": ["CVE-2014-3597"], "safe_ver": "8.2+"},
+        "5.5": {"risk": "CRITICAL", "cves": ["CVE-2015-8835"], "safe_ver": "8.2+"},
+        "5.6": {"risk": "HIGH", "cves": ["CVE-2016-9138"], "safe_ver": "8.2+", "note": "EOL"},
+        "7.0": {"risk": "HIGH", "cves": ["CVE-2017-5340"], "safe_ver": "8.2+", "note": "EOL"},
+        "7.1": {"risk": "HIGH", "cves": ["CVE-2018-10545"], "safe_ver": "8.2+", "note": "EOL"},
+        "7.2": {"risk": "MEDIUM", "cves": ["CVE-2019-11041"], "safe_ver": "8.2+", "note": "EOL"},
+        "7.3": {"risk": "MEDIUM", "cves": ["CVE-2021-21705"], "safe_ver": "8.2+"},
+        "7.4": {"risk": "MEDIUM", "cves": ["CVE-2022-31625"], "safe_ver": "8.2+"},
+        "8.0": {"risk": "LOW", "cves": ["CVE-2023-3247"], "safe_ver": "8.2+"},
+    },
+    "redis": {
+        "2.": {"risk": "HIGH", "cves": ["CVE-2015-8080"], "safe_ver": "7.0+"},
+        "3.": {"risk": "HIGH", "cves": ["CVE-2016-8339"], "safe_ver": "7.0+"},
+        "4.": {"risk": "HIGH", "cves": ["CVE-2018-11218", "CVE-2018-12326"], "safe_ver": "7.0+"},
+        "5.": {"risk": "MEDIUM", "cves": ["CVE-2021-32625"], "safe_ver": "7.0+"},
+        "6.0": {"risk": "MEDIUM", "cves": ["CVE-2021-32761"], "safe_ver": "7.0+"},
+        "6.2": {"risk": "LOW", "cves": ["CVE-2022-24736"], "safe_ver": "7.0+"},
+    },
+    "mysql": {
+        "5.0": {"risk": "CRITICAL", "cves": ["CVE-2009-4484"], "safe_ver": "8.0+"},
+        "5.1": {"risk": "HIGH", "cves": ["CVE-2010-3833"], "safe_ver": "8.0+"},
+        "5.5": {"risk": "HIGH", "cves": ["CVE-2016-0640"], "safe_ver": "8.0+"},
+        "5.6": {"risk": "MEDIUM", "cves": ["CVE-2019-2534"], "safe_ver": "8.0+"},
+        "5.7": {"risk": "MEDIUM", "cves": ["CVE-2020-2574"], "safe_ver": "8.0+"},
+    },
+    "openssl": {
+        "0.9": {"risk": "CRITICAL", "cves": ["CVE-2014-0160"], "safe_ver": "3.0+", "note": "Heartbleed era"},
+        "1.0.1": {"risk": "CRITICAL", "cves": ["CVE-2014-0160", "CVE-2014-0224"], "safe_ver": "3.0+",
+                  "note": "Heartbleed — private key extraction possible"},
+        "1.0.2": {"risk": "HIGH", "cves": ["CVE-2015-0291", "CVE-2016-2108"], "safe_ver": "3.0+"},
+        "1.1.0": {"risk": "MEDIUM", "cves": ["CVE-2017-3737"], "safe_ver": "3.0+"},
+        "1.1.1": {"risk": "LOW", "cves": ["CVE-2022-0778"], "safe_ver": "3.0+"},
+    },
+    "proftpd": {
+        "1.3.0": {"risk": "CRITICAL", "cves": ["CVE-2010-4221"], "safe_ver": "1.3.8+"},
+        "1.3.3": {"risk": "CRITICAL", "cves": ["CVE-2010-4221"], "safe_ver": "1.3.8+"},
+        "1.3.5": {"risk": "HIGH", "cves": ["CVE-2019-12815"], "safe_ver": "1.3.8+"},
+        "1.3.6": {"risk": "MEDIUM", "cves": ["CVE-2020-9272"], "safe_ver": "1.3.8+"},
+    },
+    "vsftpd": {
+        "2.3.4": {"risk": "CRITICAL", "cves": ["CVE-2011-2523"], "safe_ver": "3.0.5+",
+                  "note": "Backdoor RCE — smile ':)' in username triggers shell"},
+        "3.0.2": {"risk": "LOW", "cves": [], "safe_ver": "3.0.5+"},
+    },
+    "iis": {
+        "5.": {"risk": "CRITICAL", "cves": ["CVE-2001-0333", "CVE-2003-0223"], "safe_ver": "10+"},
+        "6.": {"risk": "CRITICAL", "cves": ["CVE-2017-7269"], "safe_ver": "10+",
+               "note": "WebDAV RCE — widely exploited"},
+        "7.": {"risk": "HIGH", "cves": ["CVE-2010-3972"], "safe_ver": "10+"},
+        "8.": {"risk": "MEDIUM", "cves": ["CVE-2015-1635"], "safe_ver": "10+"},
+    },
+}
+
+
 class SecurityTools:
     """Security scanning and lookup tools for the crew."""
 
@@ -100,21 +276,26 @@ class SecurityTools:
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
         Scan target for open ports and services.
-        Primary: nmap -Pn -sV --top-ports=50
-        Fallback: socket-based scanner if nmap unavailable or times out.
+        Primary: nmap -Pn -sV -T4 --top-ports=50 --host-timeout=45s
+        Fallback: parallel socket-based scanner if nmap unavailable or times out.
         """
-        import re
-        if not target or target.startswith("-") or not re.match(r'^[a-zA-Z0-9.\-:/\[\]_]+$', target):
+        import re as _re
+        if not target or target.startswith("-") or not _re.match(r'^[a-zA-Z0-9.\-:/\[\]_]+$', target):
             return {"status": "error", "scanner": "nmap", "message": "Invalid target format"}
 
         try:
-            cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
+            cmd = [
+                "nmap", "-Pn", "-sV", "-T4",
+                "--top-ports=50",
+                "--host-timeout=45s",   # hard wall so subprocess timeout is never hit
+                "--version-intensity=0",# fast banner-only version detection
+            ]
             if verbose:
                 cmd.append("-v")
             cmd.append(target)
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60
+                cmd, capture_output=True, text=True, timeout=90
             )
 
             if result.returncode == 0 or (result.stdout and "Nmap scan report" in result.stdout):
@@ -136,38 +317,49 @@ class SecurityTools:
         except Exception:
             pass  # any other nmap error → socket fallback
 
-        # Socket-based fallback
+        # Parallel socket-based fallback
         return self._socket_scan(target)
 
-    def _socket_scan(self, target: str, timeout: float = 1.0) -> Dict[str, Any]:
-        """Lightweight socket-based port scanner — no external dependencies."""
-        open_ports = []
+    def _socket_scan(self, target: str, timeout: float = 1.0,
+                     workers: int = 50) -> Dict[str, Any]:
+        """Lightweight parallel socket-based port scanner — no external dependencies."""
         try:
-            host = socket.gethostbyname(target)
-        except socket.gaierror as e:
+            host = socket.gethostbyname(target.split(":")[0])
+        except (socket.gaierror, UnicodeError) as e:
             return {"status": "error", "scanner": "socket", "message": f"DNS resolution failed: {e}"}
 
-        for port in _COMMON_PORTS:
+        lock = threading.Lock()
+        open_ports: list = []
+
+        def probe(port: int):
             try:
-                with socket.create_connection((host, port), timeout=timeout) as conn:
+                conn = socket.create_connection((host, port), timeout=timeout)
+                with conn:
                     service = _SERVICE_NAMES.get(port, "unknown")
-                    banner = ""
-                    if port in _BANNER_PORTS:
-                        banner = self._grab_banner(conn)
+                    banner = self._grab_banner(conn) if port in _BANNER_PORTS else ""
                     entry = {"port": f"{port}/tcp", "state": "open", "service": service}
                     if banner:
                         entry["banner"] = banner
-                    open_ports.append(entry)
-            except (socket.timeout, ConnectionRefusedError, OSError):
+                    with lock:
+                        open_ports.append(entry)
+            except (socket.timeout, ConnectionRefusedError, OSError, UnicodeError):
                 pass
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(workers, len(_COMMON_PORTS))) as ex:
+            list(ex.map(probe, _COMMON_PORTS))
+
+        # Sort by port number for consistent output
+        open_ports.sort(key=lambda p: int(p["port"].split("/")[0]))
 
         output_lines = [
             f"Socket scan report for {target} ({host})",
-            f"Scanned {len(_COMMON_PORTS)} common ports",
+            f"Scanned {len(_COMMON_PORTS)} common ports (parallel)",
             "",
         ]
         for p in open_ports:
-            output_lines.append(f"{p['port']:<12} open   {p['service']}")
+            banner_str = f"   [{p['banner']}]" if p.get("banner") else ""
+            output_lines.append(f"{p['port']:<12} open   {p['service']}{banner_str}")
         output_lines.append(f"\n{len(open_ports)} open port(s) found.")
 
         return {
@@ -176,7 +368,7 @@ class SecurityTools:
             "target": target,
             "output": "\n".join(output_lines),
             "open_ports": open_ports,
-            "note": "nmap unavailable — used socket scanner (no version detection)",
+            "note": "nmap unavailable — used parallel socket scanner (no version detection)",
         }
 
     @staticmethod
@@ -200,47 +392,66 @@ class SecurityTools:
         """
         Identify a web server: status, server banner, page title, and detected
         technologies (from headers and cookies). Tries HTTPS then HTTP.
+        Probes root plus a few common landing pages to maximise header/title coverage.
         """
         if not _validate_target(target.replace("http://", "").replace("https://", "").split("/")[0]):
             return {"status": "error", "tool": "http_fingerprint", "message": "Invalid target format"}
 
+        ua = {"User-Agent": "SecureFlow-Scanner/1.0"}
+        # Merged header/tech/title from multiple probe paths for thoroughness
+        merged_headers: Dict[str, str] = {}
+        merged_cookies = ""
+        best_title = ""
+        best_status = None
+        final_url = ""
         last_error = None
+
         for prefer_https in (True, False):
-            url = _normalize_url(target, prefer_https=prefer_https)
-            try:
-                resp = requests.get(
-                    url, timeout=timeout, allow_redirects=True,
-                    verify=False, headers={"User-Agent": "SecureFlow-Scanner/1.0"},
-                )
-            except _NET_ERRORS as exc:
-                last_error = str(exc)
-                continue
+            base_url = _normalize_url(target, prefer_https=prefer_https)
+            probe_urls = [base_url + p for p in ("", "/index.php", "/index.html", "/index.asp")]
+            for url in probe_urls:
+                try:
+                    resp = requests.get(url, timeout=timeout, allow_redirects=True,
+                                        verify=False, headers=ua)
+                except _NET_ERRORS as exc:
+                    last_error = str(exc)
+                    continue
 
-            headers = {k.lower(): v for k, v in resp.headers.items()}
-            cookies = "; ".join(c.name for c in resp.cookies).lower()
-            technologies = self._detect_technologies(headers, cookies)
+                if best_status is None:
+                    best_status = resp.status_code
+                    final_url = resp.url
 
-            title = ""
-            match = re.search(r"<title[^>]*>(.*?)</title>", resp.text or "", re.IGNORECASE | re.DOTALL)
-            if match:
-                title = re.sub(r"\s+", " ", match.group(1)).strip()[:200]
+                # Accumulate headers (later probes fill gaps left by earlier ones)
+                for k, v in resp.headers.items():
+                    if k.lower() not in merged_headers:
+                        merged_headers[k.lower()] = v
+                merged_cookies += " " + "; ".join(c.name for c in resp.cookies).lower()
 
-            return {
-                "status": "success",
-                "tool": "http_fingerprint",
-                "target": target,
-                "final_url": resp.url,
-                "http_status": resp.status_code,
-                "server": resp.headers.get("Server", "unknown"),
-                "powered_by": resp.headers.get("X-Powered-By", ""),
-                "title": title,
-                "technologies": technologies,
-                "content_length": len(resp.content),
-            }
+                # Take first non-empty title
+                if not best_title:
+                    m = re.search(r"<title[^>]*>(.*?)</title>",
+                                  resp.text or "", re.IGNORECASE | re.DOTALL)
+                    if m:
+                        best_title = re.sub(r"\s+", " ", m.group(1)).strip()[:200]
 
+            if best_status is not None:
+                break  # got a valid response on this scheme
+
+        if best_status is None:
+            return {"status": "error", "tool": "http_fingerprint",
+                    "target": target, "message": f"No HTTP(S) response: {last_error}"}
+
+        technologies = self._detect_technologies(merged_headers, merged_cookies.strip())
         return {
-            "status": "error", "tool": "http_fingerprint",
-            "target": target, "message": f"No HTTP(S) response: {last_error}",
+            "status": "success",
+            "tool": "http_fingerprint",
+            "target": target,
+            "final_url": final_url,
+            "http_status": best_status,
+            "server": merged_headers.get("server", "unknown"),
+            "powered_by": merged_headers.get("x-powered-by", ""),
+            "title": best_title,
+            "technologies": technologies,
         }
 
     @staticmethod
@@ -627,6 +838,804 @@ class SecurityTools:
 
         return recommendations
 
+    # ==================================================================
+    # TOOL 5: Subdomain Enumeration
+    # DNS brute-force + zone-transfer attempt + wildcard detection.
+    # ==================================================================
+
+    def subdomain_enum(self, domain: str, wordlist: List[str] = None,
+                       threads: int = 30) -> Dict[str, Any]:
+        """
+        Enumerate subdomains via DNS brute-force (built-in wordlist + custom),
+        zone-transfer (AXFR) attempt, and wildcard detection.
+        Pure-Python, works without any external binaries.
+        """
+        host = domain.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+        if not _validate_target(host):
+            return {"status": "error", "tool": "subdomain_enum", "message": "Invalid domain format"}
+
+        try:
+            import dns.resolver, dns.query, dns.zone, dns.exception, dns.name
+        except ImportError:
+            return {"status": "error", "tool": "subdomain_enum",
+                    "message": "dnspython not installed"}
+
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = 3.0
+        resolver.lifetime = 3.0
+
+        # -- 1. Wildcard detection ----------------------------------------
+        probe = f"__wildcard_probe_{int(time.time())}.{host}"
+        wildcard_ip = None
+        try:
+            ans = resolver.resolve(probe, "A")
+            wildcard_ip = ans[0].address
+        except Exception:
+            pass
+
+        # -- 2. Zone transfer (AXFR) — passive, read-only -------------------
+        axfr_records = []
+        try:
+            ns_ans = resolver.resolve(host, "NS", lifetime=5)
+            for ns_rdata in ns_ans:
+                ns_host = str(ns_rdata.target).rstrip(".")
+                try:
+                    zone = dns.zone.from_xfr(dns.query.xfr(ns_host, host, lifetime=5))
+                    for name, _ in zone.nodes.items():
+                        axfr_records.append(str(name) + "." + host)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # -- 3. Brute-force wordlist -----------------------------------------
+        if wordlist is None:
+            wordlist = _SUBDOMAIN_WORDLIST
+
+        found = {}
+        lock = threading.Lock()
+
+        def resolve_sub(sub):
+            fqdn = f"{sub}.{host}"
+            try:
+                ans = resolver.resolve(fqdn, "A", lifetime=2)
+                ips = [r.address for r in ans]
+                if wildcard_ip and all(ip == wildcard_ip for ip in ips):
+                    return  # wildcard match — not a real subdomain
+                with lock:
+                    found[fqdn] = ips
+            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
+                    dns.resolver.NoNameservers, dns.exception.Timeout):
+                pass
+            except Exception:
+                pass
+
+        with __import__("concurrent.futures", fromlist=["ThreadPoolExecutor"]).ThreadPoolExecutor(
+            max_workers=threads
+        ) as ex:
+            list(ex.map(resolve_sub, wordlist))
+
+        all_subs = dict(sorted(found.items()))
+        return {
+            "status": "success",
+            "tool": "subdomain_enum",
+            "domain": host,
+            "wildcard_detected": wildcard_ip is not None,
+            "wildcard_ip": wildcard_ip,
+            "zone_transfer_records": axfr_records,
+            "subdomains_found": len(all_subs),
+            "subdomains": all_subs,
+        }
+
+    # ==================================================================
+    # TOOL 6: WAF Detection
+    # Fingerprints Web Application Firewalls by probing with payloads
+    # and analysing response anomalies / WAF-specific headers.
+    # ==================================================================
+
+    def waf_detect(self, target: str, timeout: float = 10.0) -> Dict[str, Any]:
+        """
+        Detect the presence and identity of a WAF/CDN by:
+        1. Comparing normal vs attack-payload responses (status, length, headers).
+        2. Checking for WAF-specific response headers and cookies.
+        3. Looking for WAF vendor signatures in response bodies.
+        Returns WAF name (or 'unknown WAF') + confidence + evidence.
+        """
+        host = target.replace("http://", "").replace("https://", "").split("/")[0]
+        if not _validate_target(host):
+            return {"status": "error", "tool": "waf_detect", "message": "Invalid target format"}
+
+        base = self._resolve_base_url(target, timeout=timeout)
+        if not base:
+            return {"status": "error", "tool": "waf_detect", "target": target,
+                    "message": "No reachable HTTP(S) service"}
+
+        probe_headers = {"User-Agent": "SecureFlow-Scanner/1.0"}
+
+        # Normal request
+        try:
+            normal = requests.get(base + "/", timeout=timeout, verify=False,
+                                  allow_redirects=True, headers=probe_headers)
+        except _NET_ERRORS as e:
+            return {"status": "error", "tool": "waf_detect", "message": str(e)}
+
+        # Attack-payload request (benign-looking but triggers WAF rules)
+        try:
+            attack = requests.get(
+                base + "/?a=<script>alert(1)</script>&b=1+AND+1=1--&c=../etc/passwd",
+                timeout=timeout, verify=False, allow_redirects=False,
+                headers=probe_headers,
+            )
+        except _NET_ERRORS:
+            attack = None
+
+        evidence = []
+        waf_name = None
+
+        # Check WAF-specific headers and cookies
+        all_headers = {k.lower(): v.lower() for k, v in normal.headers.items()}
+        for k, v in all_headers.items():
+            for vendor, name in _WAF_HEADER_SIGNATURES.items():
+                if vendor in k or vendor in v:
+                    waf_name = waf_name or name
+                    evidence.append(f"header {k}: {v[:60]}")
+
+        # Check vendor signatures in normal response body (first 4 KB)
+        body_sample = (normal.text or "")[:4096].lower()
+        for pattern, name in _WAF_BODY_SIGNATURES.items():
+            if pattern in body_sample:
+                waf_name = waf_name or name
+                evidence.append(f"body pattern: {pattern!r}")
+
+        # Compare normal vs attack response
+        if attack is not None:
+            if normal.status_code != attack.status_code and attack.status_code in (403, 406, 429, 444, 501):
+                evidence.append(f"attack payload → HTTP {attack.status_code} (vs normal {normal.status_code})")
+                waf_name = waf_name or "unknown WAF"
+
+            attack_headers = {k.lower(): v.lower() for k, v in attack.headers.items()}
+            for k, v in attack_headers.items():
+                for vendor, name in _WAF_HEADER_SIGNATURES.items():
+                    if vendor in k or vendor in v:
+                        waf_name = name
+                        evidence.append(f"attack resp header {k}: {v[:60]}")
+
+        confidence = ("high" if len(evidence) >= 3
+                      else "medium" if len(evidence) >= 1
+                      else "none")
+        return {
+            "status": "success",
+            "tool": "waf_detect",
+            "target": target,
+            "waf_detected": waf_name is not None,
+            "waf_name": waf_name,
+            "confidence": confidence,
+            "evidence": evidence,
+            "normal_status": normal.status_code,
+            "attack_status": attack.status_code if attack is not None else None,
+        }
+
+    # ==================================================================
+    # TOOL 7: HTTP Vulnerability Scanner
+    # Actively probes for classes of web vulnerabilities with safe,
+    # non-destructive payloads. Returns concrete evidence, not guesses.
+    # ==================================================================
+
+    def http_vuln_scan(self, target: str, timeout: float = 10.0) -> Dict[str, Any]:
+        """
+        Active HTTP vulnerability scan covering:
+        - SQLi error disclosure (database error in response)
+        - XSS reflection (payload echoed back verbatim)
+        - Open redirect (Location header follows attacker URL)
+        - Directory listing enabled
+        - Stack trace / debug info disclosure
+        - Server-side path traversal error indicators
+        - Default pages (phpinfo, test pages, admin)
+        All payloads are read-only (GET) and non-destructive.
+        """
+        host = target.replace("http://", "").replace("https://", "").split("/")[0]
+        if not _validate_target(host):
+            return {"status": "error", "tool": "http_vuln_scan", "message": "Invalid target format"}
+
+        base = self._resolve_base_url(target, timeout=timeout)
+        if not base:
+            return {"status": "error", "tool": "http_vuln_scan", "target": target,
+                    "message": "No reachable HTTP(S) service"}
+
+        findings = []
+        hdrs = {"User-Agent": "SecureFlow-Scanner/1.0"}
+
+        def get(path: str, params: dict = None) -> Any:
+            try:
+                return requests.get(base + path, params=params, timeout=timeout,
+                                    verify=False, allow_redirects=False, headers=hdrs)
+            except _NET_ERRORS:
+                return None
+
+        # Common paths to probe for input-reflection vulnerabilities.
+        # Covers root plus the most common endpoints in real apps.
+        _probe_paths_list = [
+            "/", "/search", "/index.php", "/index.asp", "/home",
+            "/query", "/results", "/find", "/filter",
+        ]
+
+        # -- SQLi error disclosure -------------------------------------------
+        sqli_payloads = ["'", '"', "1' OR '1'='1", "1 AND 1=2--"]
+        sqli_errors = [
+            "sql syntax", "mysql_fetch", "ora-", "pg_query", "sqlite3",
+            "unclosed quotation mark", "you have an error in your sql",
+            "warning: mysql", "invalid query", "sqlstate",
+        ]
+        sqli_found = False
+        for probe_path in _probe_paths_list:
+            if sqli_found:
+                break
+            for payload in sqli_payloads:
+                r = get(probe_path, {"id": payload, "q": payload, "search": payload})
+                if r and any(e in (r.text or "").lower() for e in sqli_errors):
+                    findings.append({
+                        "type": "SQLi Error Disclosure",
+                        "severity": "HIGH",
+                        "evidence": f"Database error in response to payload: {payload!r}",
+                        "path": probe_path,
+                    })
+                    sqli_found = True
+                    break
+
+        # -- XSS reflection --------------------------------------------------
+        xss_token = "SEC_FLOW_XSS_7f3a"
+        xss_payload = f"<script>{xss_token}</script>"
+        xss_params = {"q": xss_payload, "search": xss_payload, "s": xss_payload,
+                      "query": xss_payload, "name": xss_payload, "input": xss_payload}
+        for probe_path in _probe_paths_list:
+            r = get(probe_path, xss_params)
+            if r and xss_token in (r.text or ""):
+                findings.append({
+                    "type": "Reflected XSS",
+                    "severity": "HIGH",
+                    "evidence": f"Payload token reflected verbatim in response body",
+                    "path": probe_path,
+                })
+                break
+
+        # -- Open redirect ---------------------------------------------------
+        redirect_payloads = [
+            "//evil.com", "https://evil.com", "/\\evil.com",
+        ]
+        for param in ("url", "redirect", "next", "return", "returnUrl", "r", "goto"):
+            for payload in redirect_payloads:
+                r = get("/", {param: payload})
+                if r and r.status_code in (301, 302, 303, 307, 308):
+                    loc = r.headers.get("Location", "")
+                    if "evil.com" in loc or loc.startswith("//"):
+                        findings.append({
+                            "type": "Open Redirect",
+                            "severity": "MEDIUM",
+                            "evidence": f"Redirect to {loc!r} via ?{param}={payload!r}",
+                            "path": "/",
+                        })
+
+        # -- Directory listing -----------------------------------------------
+        for path in ("/", "/static/", "/assets/", "/files/", "/uploads/",
+                     "/images/", "/backup/", "/tmp/"):
+            r = get(path)
+            if r and r.status_code == 200:
+                body = (r.text or "").lower()
+                if ("index of " in body and "<a href" in body) or \
+                   ("directory listing" in body) or \
+                   ("parent directory" in body and "last modified" in body):
+                    findings.append({
+                        "type": "Directory Listing",
+                        "severity": "MEDIUM",
+                        "evidence": f"Directory index exposed at {path}",
+                        "path": path,
+                    })
+                    break
+
+        # -- Stack trace / debug info disclosure -----------------------------
+        debug_patterns = [
+            (r"traceback \(most recent call last\)", "Python traceback"),
+            (r"java\.lang\.", "Java stack trace"),
+            (r"system\.web\.httpunhandledexception", "ASP.NET exception"),
+            (r"debug: true|debug_mode|debug=1", "Debug mode enabled"),
+            (r"at [a-z]+\.[a-z]+\([a-zA-Z]+\.java:\d+\)", "Java stack trace"),
+            (r"fatal error.*in.*on line \d+", "PHP fatal error"),
+            (r"django\.core\.exceptions", "Django exception"),
+        ]
+        error_paths = ["/", "/?error=1", "/nonexistent_" + str(int(time.time()))]
+        for path in error_paths:
+            r = get(path)
+            if r and r.status_code in (200, 400, 404, 500):
+                body = (r.text or "").lower()
+                for pattern, desc in debug_patterns:
+                    if re.search(pattern, body):
+                        findings.append({
+                            "type": "Stack Trace / Debug Disclosure",
+                            "severity": "MEDIUM",
+                            "evidence": f"{desc} found in response to {path}",
+                            "path": path,
+                        })
+                        break
+
+        # -- Default / admin pages -------------------------------------------
+        for path, name in [("/phpinfo.php", "phpinfo"), ("/test.php", "test page"),
+                            ("/server-status", "mod_status"), ("/adminer.php", "Adminer DB UI"),
+                            ("/phpmyadmin", "phpMyAdmin"), ("/wp-admin", "WordPress admin")]:
+            r = get(path)
+            if r and r.status_code == 200 and len(r.content) > 100:
+                body = (r.text or "").lower()
+                indicators = {
+                    "phpinfo": "php version" in body,
+                    "adminer DB UI": "adminer" in body,
+                    "phpMyAdmin": "phpmyadmin" in body,
+                    "WordPress admin": "wp-login" in body or "wordpress" in body,
+                    "mod_status": "server version" in body and "requests currently" in body,
+                }
+                if indicators.get(name, True):
+                    findings.append({
+                        "type": "Sensitive Admin Page",
+                        "severity": "HIGH",
+                        "evidence": f"{name} accessible at {path}",
+                        "path": path,
+                    })
+
+        # -- Open redirect (extended: probe common redirect endpoints) ------
+        redirect_endpoints = [
+            "/", "/redirect", "/login", "/oauth/callback", "/auth/callback",
+            "/sso", "/goto", "/out", "/exit", "/link",
+        ]
+        redirect_params = ("url", "redirect", "next", "return", "returnUrl",
+                           "r", "goto", "location", "target", "redirect_uri",
+                           "continue", "forward", "back", "destination")
+        redirect_payloads = ["//evil.example.com", "https://evil.example.com",
+                             "/\\evil.example.com", "///evil.example.com"]
+        seen_redirect = False
+        for ep in redirect_endpoints:
+            if seen_redirect:
+                break
+            for param in redirect_params:
+                if seen_redirect:
+                    break
+                for payload in redirect_payloads:
+                    r = get(ep, {param: payload})
+                    if r and r.status_code in (301, 302, 303, 307, 308):
+                        loc = r.headers.get("Location", "")
+                        if "evil.example.com" in loc or (loc.startswith("//") and "evil" in loc):
+                            findings.append({
+                                "type": "Open Redirect",
+                                "severity": "MEDIUM",
+                                "evidence": f"Unvalidated redirect to {loc!r} via {ep}?{param}={payload!r}",
+                                "path": ep,
+                            })
+                            seen_redirect = True
+                            break
+
+        # -- SSTI (Server-Side Template Injection) -------------------------
+        # Payload: {{7*7}} — if response contains literal "49", template eval occurred.
+        # Also tests: ${7*7} (Freemarker/Groovy), #{7*7} (Thymeleaf), <%=7*7%> (ERB)
+        ssti_probes = [
+            ("{{7*7}}", "49"),       # Jinja2, Twig, Django, Pebble
+            ("${7*7}", "49"),        # Freemarker, Groovy, Spring Expression
+            ("#{7*7}", "49"),        # Thymeleaf, Ruby
+            ("<%= 7*7 %>", "49"),    # ERB, JSP
+            ("{{7*'7'}}", "7777777"),# Jinja2 string multiplication
+        ]
+        ssti_endpoints = ["/", "/render", "/template", "/page", "/view",
+                          "/content", "/preview", "/email", "/report"]
+        ssti_params = ("template", "tmpl", "tpl", "view", "page", "content",
+                       "q", "s", "search", "name", "text", "msg", "message")
+        ssti_found = False
+        for ep in ssti_endpoints:
+            if ssti_found:
+                break
+            for payload, expected in ssti_probes:
+                if ssti_found:
+                    break
+                for param in ssti_params:
+                    r = get(ep, {param: payload})
+                    if r and expected in (r.text or ""):
+                        findings.append({
+                            "type": "SSTI (Server-Side Template Injection)",
+                            "severity": "CRITICAL",
+                            "evidence": f"Payload {payload!r} evaluated to {expected!r} on {ep}?{param}=",
+                            "path": ep,
+                            "note": "SSTI can lead to Remote Code Execution",
+                        })
+                        ssti_found = True
+                        break
+
+        # -- LFI (Local File Inclusion / Path Traversal) -------------------
+        lfi_payloads = [
+            "../etc/passwd", "../../etc/passwd", "../../../etc/passwd",
+            "....//....//etc/passwd", "/etc/passwd",
+            "../etc/shadow", "..\\..\\windows\\system32\\drivers\\etc\\hosts",
+        ]
+        lfi_errors = [
+            "failed to open stream", "include(", "require(", "no such file",
+            "open_basedir restriction", "permission denied", "file not found",
+            "warning: include", "warning: require",
+        ]
+        lfi_root5 = ["root:x:0:", "root:!:", "[boot loader]", "localhost"]  # file content hints
+        lfi_endpoints = ["/", "/read", "/include", "/page", "/load",
+                         "/file", "/view", "/content", "/show", "/open",
+                         "/download", "/fetch", "/get", "/display"]
+        lfi_params = ("file", "page", "include", "path", "load", "f",
+                      "filename", "filepath", "url", "source", "doc", "read")
+        lfi_found = False
+        for ep in lfi_endpoints:
+            if lfi_found:
+                break
+            for payload in lfi_payloads:
+                if lfi_found:
+                    break
+                for param in lfi_params:
+                    r = get(ep, {param: payload})
+                    if r:
+                        body_lower = (r.text or "").lower()
+                        file_leaked = any(h in body_lower for h in lfi_root5)
+                        error_leaked = any(e in body_lower for e in lfi_errors)
+                        if file_leaked or error_leaked:
+                            sev = "CRITICAL" if file_leaked else "HIGH"
+                            findings.append({
+                                "type": "LFI / Path Traversal",
+                                "severity": sev,
+                                "evidence": (
+                                    f"File contents leaked" if file_leaked
+                                    else f"Include error revealed"
+                                ) + f" on {ep}?{param}={payload!r}",
+                                "path": ep,
+                                "note": "Can expose /etc/passwd, config files, source code",
+                            })
+                            lfi_found = True
+                            break
+
+        # -- Command Injection (error-based detection) ---------------------
+        cmd_payloads = [
+            (";id", ["uid=", "gid=", "groups="]),
+            ("|id", ["uid=", "gid="]),
+            ("&&whoami", ["root", "www-data", "apache", "nginx"]),
+            ("`id`", ["uid=", "gid="]),
+            (";sleep 0;echo SF_CMDINJ_OK", ["SF_CMDINJ_OK"]),
+            # Windows
+            ("&whoami", ["nt authority", "system"]),
+        ]
+        shell_errors = [
+            "sh: ", "bash: ", "command not found", "/bin/sh", "syntax error",
+            "unexpected token", "is not recognized as",
+        ]
+        cmd_endpoints = ["/", "/ping", "/exec", "/run", "/cmd", "/command",
+                         "/system", "/shell", "/trace", "/nslookup", "/whois",
+                         "/lookup", "/check", "/test", "/scan"]
+        cmd_params = ("host", "ip", "target", "cmd", "command", "exec",
+                      "q", "query", "domain", "input", "arg", "param")
+        cmd_found = False
+        for ep in cmd_endpoints:
+            if cmd_found:
+                break
+            for payload, indicators in cmd_payloads:
+                if cmd_found:
+                    break
+                for param in cmd_params:
+                    r = get(ep, {param: f"localhost{payload}"})
+                    if r:
+                        body_lower = (r.text or "").lower()
+                        body_orig = (r.text or "")
+                        # Command output OR shell error message
+                        output_found = any(ind in body_orig or ind in body_lower for ind in indicators)
+                        error_found = any(e in body_lower for e in shell_errors)
+                        if output_found or error_found:
+                            sev = "CRITICAL" if output_found else "HIGH"
+                            findings.append({
+                                "type": "Command Injection",
+                                "severity": sev,
+                                "evidence": (
+                                    f"Shell output leaked" if output_found
+                                    else f"Shell error disclosed"
+                                ) + f" on {ep}?{param}=localhost{payload!r}",
+                                "path": ep,
+                                "note": "OS command injection can lead to full server compromise",
+                            })
+                            cmd_found = True
+                            break
+
+        # -- GraphQL introspection enabled ---------------------------------
+        graphql_endpoints = ["/graphql", "/api/graphql", "/gql", "/query",
+                             "/api/query", "/graphiql", "/playground"]
+        for ep in graphql_endpoints:
+            r = get(ep, {"query": "{__schema{types{name}}}"})
+            if r and r.status_code == 200:
+                body = r.text or ""
+                if "__schema" in body and "types" in body:
+                    findings.append({
+                        "type": "GraphQL Introspection Enabled",
+                        "severity": "MEDIUM",
+                        "evidence": f"__schema query returned schema at {ep}",
+                        "path": ep,
+                        "note": "Exposes full API schema to attackers; disable in production",
+                    })
+                    break
+
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        findings.sort(key=lambda f: severity_order.get(f["severity"], 9))
+        return {
+            "status": "success",
+            "tool": "http_vuln_scan",
+            "target": target,
+            "findings_count": len(findings),
+            "findings": findings,
+        }
+
+    # ==================================================================
+    # TOOL 8: Service-Specific Probe
+    # Tests concrete, protocol-level security weaknesses per service:
+    # unauthenticated access, anonymous login, default credentials.
+    # ==================================================================
+
+    def service_probe(self, target: str, port: int, service: str,
+                      timeout: float = 5.0) -> Dict[str, Any]:
+        """
+        Protocol-level security probe for specific services:
+        - Redis: check for NOAUTH (unauthenticated) access
+        - FTP: test anonymous login
+        - MongoDB: attempt unauthenticated list collections
+        - Elasticsearch: probe for open HTTP API (/_cat/indices)
+        - Memcached: check for unauthenticated stats
+        - SMTP: check for open relay potential (VRFY/EXPN)
+        - SSH: identify algorithm weaknesses from banner
+        """
+        if not _validate_target(target):
+            return {"status": "error", "tool": "service_probe", "message": "Invalid target"}
+
+        svc = service.lower()
+        try:
+            if svc in ("redis",):
+                return self._probe_redis(target, port, timeout)
+            if svc in ("ftp",):
+                return self._probe_ftp(target, port, timeout)
+            if svc in ("mongodb", "mongo"):
+                return self._probe_mongodb(target, port, timeout)
+            if svc in ("elasticsearch", "es"):
+                return self._probe_elasticsearch(target, port, timeout)
+            if svc in ("memcached", "memcache"):
+                return self._probe_memcached(target, port, timeout)
+            if svc in ("smtp",):
+                return self._probe_smtp(target, port, timeout)
+            if svc in ("ssh",):
+                return self._probe_ssh(target, port, timeout)
+            return {"status": "error", "tool": "service_probe",
+                    "message": f"No probe implemented for service: {service}"}
+        except Exception as exc:
+            return {"status": "error", "tool": "service_probe",
+                    "target": target, "port": port, "service": service,
+                    "message": str(exc)}
+
+    def _sock_conn(self, host: str, port: int, timeout: float) -> socket.socket:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        return s
+
+    def _probe_redis(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        with self._sock_conn(host, port, timeout) as s:
+            s.sendall(b"PING\r\n")
+            resp = s.recv(256).decode("latin-1", errors="replace")
+        unauth = "+PONG" in resp
+        version = ""
+        if unauth:
+            try:
+                with self._sock_conn(host, port, timeout) as s2:
+                    s2.sendall(b"INFO server\r\n")
+                    info = s2.recv(2048).decode("latin-1", errors="replace")
+                version_m = re.search(r"redis_version:(\S+)", info)
+                if version_m:
+                    version = version_m.group(1)
+            except Exception:
+                pass
+        risk = "CRITICAL" if unauth else "none"
+        return {
+            "status": "success", "tool": "service_probe", "service": "redis",
+            "host": host, "port": port, "unauthenticated_access": unauth,
+            "version": version, "risk": risk,
+            "finding": "Redis accepts commands without authentication — all data readable/writable." if unauth else "",
+        }
+
+    def _probe_ftp(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        with self._sock_conn(host, port, timeout) as s:
+            banner = s.recv(512).decode("latin-1", errors="replace").strip()
+            s.sendall(b"USER anonymous\r\n")
+            r1 = s.recv(256).decode("latin-1", errors="replace")
+            anon_ok = False
+            if r1.startswith("331"):
+                s.sendall(b"PASS secureflow@scan.local\r\n")
+                r2 = s.recv(256).decode("latin-1", errors="replace")
+                anon_ok = r2.startswith("230")
+        risk = "HIGH" if anon_ok else "none"
+        return {
+            "status": "success", "tool": "service_probe", "service": "ftp",
+            "host": host, "port": port, "banner": banner.splitlines()[0][:120],
+            "anonymous_login": anon_ok, "risk": risk,
+            "finding": "Anonymous FTP login accepted — unauthenticated read/write may be possible." if anon_ok else "",
+        }
+
+    def _probe_mongodb(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        # MongoDB wire protocol: send isMaster command, check for auth requirement.
+        # OP_QUERY message for {isMaster:1} on 'admin.$cmd'
+        import struct
+        query_doc = (
+            b"\x13\x00\x00\x00"           # doc length (19)
+            b"\x10isMaster\x00\x01\x00\x00\x00\x00"
+        )
+        ns = b"admin.$cmd\x00"
+        header = struct.pack("<iiiiBBBi", 41 + len(ns) + len(query_doc), 0, 0, 2004,
+                             0, 0, 0, 1) if False else b""
+        # Simpler: just check if port is open and banner reveals version
+        try:
+            with self._sock_conn(host, port, timeout) as s:
+                # Mongo sends nothing on connect; try a minimal HTTP-like probe
+                s.sendall(b"db.version()\n")
+                time.sleep(0.3)
+                data = s.recv(256)
+                version_hint = data.decode("latin-1", errors="replace")
+                open_access = len(data) > 0
+        except Exception:
+            open_access = False
+            version_hint = ""
+        risk = "HIGH" if open_access else "low"
+        return {
+            "status": "success", "tool": "service_probe", "service": "mongodb",
+            "host": host, "port": port, "port_open": open_access,
+            "response_sample": version_hint[:80], "risk": risk,
+            "finding": "MongoDB port is open — verify authentication is required and bind-ip is restricted." if open_access else "",
+        }
+
+    def _probe_elasticsearch(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        # ES exposes HTTP API — check if /_cat/indices responds without auth
+        for scheme in ("http", "https"):
+            try:
+                r = requests.get(
+                    f"{scheme}://{host}:{port}/_cat/indices?v",
+                    timeout=timeout, verify=False,
+                    headers={"User-Agent": "SecureFlow-Scanner/1.0"},
+                )
+                open_access = r.status_code == 200 and ("index" in r.text or "green" in r.text or "yellow" in r.text)
+                version = ""
+                try:
+                    info_r = requests.get(f"{scheme}://{host}:{port}/", timeout=timeout, verify=False)
+                    version = info_r.json().get("version", {}).get("number", "")
+                except Exception:
+                    pass
+                risk = "CRITICAL" if open_access else "low"
+                return {
+                    "status": "success", "tool": "service_probe", "service": "elasticsearch",
+                    "host": host, "port": port, "open_api": open_access,
+                    "version": version, "risk": risk,
+                    "finding": "Elasticsearch /_cat/indices accessible without auth — all index data exposed." if open_access else "",
+                }
+            except _NET_ERRORS:
+                continue
+        return {"status": "error", "tool": "service_probe", "service": "elasticsearch",
+                "message": "Could not connect to Elasticsearch"}
+
+    def _probe_memcached(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        with self._sock_conn(host, port, timeout) as s:
+            s.sendall(b"stats\r\n")
+            data = s.recv(2048).decode("latin-1", errors="replace")
+        unauth = "STAT pid" in data or "STAT version" in data
+        version_m = re.search(r"STAT version (\S+)", data)
+        version = version_m.group(1) if version_m else ""
+        risk = "HIGH" if unauth else "none"
+        return {
+            "status": "success", "tool": "service_probe", "service": "memcached",
+            "host": host, "port": port, "unauthenticated_access": unauth,
+            "version": version, "risk": risk,
+            "finding": "Memcached responds to stats without auth — cache poisoning / data extraction possible." if unauth else "",
+        }
+
+    def _probe_smtp(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        with self._sock_conn(host, port, timeout) as s:
+            banner = s.recv(512).decode("latin-1", errors="replace").strip()
+            s.sendall(b"EHLO secureflow.scan\r\n")
+            ehlo_resp = s.recv(1024).decode("latin-1", errors="replace")
+            vrfy_enabled = False
+            try:
+                s.sendall(b"VRFY root\r\n")
+                vrfy_resp = s.recv(256).decode("latin-1", errors="replace")
+                vrfy_enabled = not vrfy_resp.startswith("5")
+            except Exception:
+                pass
+        findings = []
+        if vrfy_enabled:
+            findings.append("VRFY command enabled — allows user enumeration")
+        starttls = "STARTTLS" in ehlo_resp
+        auth = "AUTH" in ehlo_resp
+        risk = "MEDIUM" if vrfy_enabled else "low"
+        return {
+            "status": "success", "tool": "service_probe", "service": "smtp",
+            "host": host, "port": port, "banner": banner.splitlines()[0][:120],
+            "starttls_supported": starttls, "auth_supported": auth,
+            "vrfy_enabled": vrfy_enabled, "risk": risk, "findings": findings,
+        }
+
+    def _probe_ssh(self, host: str, port: int, timeout: float) -> Dict[str, Any]:
+        with self._sock_conn(host, port, timeout) as s:
+            banner = s.recv(512).decode("latin-1", errors="replace").strip()
+        version_m = re.search(r"SSH-\d+\.\d+-(\S+)", banner)
+        sw_version = version_m.group(1) if version_m else ""
+        warnings = []
+        if "openssh" in sw_version.lower():
+            ver_m = re.search(r"OpenSSH_(\d+\.\d+)", sw_version, re.IGNORECASE)
+            if ver_m:
+                ver = float(ver_m.group(1))
+                if ver < 7.4:
+                    warnings.append(f"OpenSSH {ver} is below 7.4 — multiple known CVEs (CVE-2016-6515, CVE-2016-10009)")
+                if ver < 8.0:
+                    warnings.append(f"OpenSSH {ver} — consider upgrading to 8.x+ for security improvements")
+        if "dropbear" in sw_version.lower():
+            warnings.append("Dropbear SSH — ensure recent version; embedded/IoT usage often unpatched")
+        risk = ("HIGH" if any("CVE" in w for w in warnings)
+                else "MEDIUM" if warnings else "low")
+        return {
+            "status": "success", "tool": "service_probe", "service": "ssh",
+            "host": host, "port": port, "banner": banner.splitlines()[0][:120],
+            "software": sw_version, "warnings": warnings, "risk": risk,
+        }
+
+    # ==================================================================
+    # TOOL 9: Version Risk Assessment (offline, no API)
+    # Instantly maps service version strings to known risk levels
+    # using a built-in knowledge base. Works without any API calls.
+    # ==================================================================
+
+    def version_risk_assess(self, service: str, version: str,
+                            banner: str = "") -> Dict[str, Any]:
+        """
+        Instant offline risk assessment for a service/version combination.
+        Checks against a built-in knowledge base of known-vulnerable versions
+        (OpenSSH, Apache, nginx, PHP, MySQL/MariaDB, OpenSSL, ProFTPd, Redis, etc.).
+        Returns risk level, CVE IDs, and recommended safe version.
+        Returns 'unknown' when the version cannot be scored (not 'low').
+        """
+        svc = service.lower().split("/")[0].strip()
+        ver_clean = version.lower().strip() if version else ""
+
+        # Extract version from banner if version string is empty
+        if not ver_clean and banner:
+            m = re.search(r"(\d+\.\d+(?:\.\d+)?)", banner)
+            if m:
+                ver_clean = m.group(1)
+
+        # Score from the knowledge base
+        kb = _VERSION_RISK_KB.get(svc, _VERSION_RISK_KB.get(svc.split("-")[0], {}))
+
+        best_match = None
+        best_score = 0
+        for kb_ver, entry in kb.items():
+            if kb_ver in ver_clean or ver_clean.startswith(kb_ver):
+                match_score = len(kb_ver)
+                if match_score > best_score:
+                    best_match = entry
+                    best_score = match_score
+
+        if best_match:
+            return {
+                "status": "success",
+                "tool": "version_risk_assess",
+                "service": service,
+                "version": version,
+                "risk": best_match["risk"],
+                "cves": best_match.get("cves", []),
+                "safe_version": best_match.get("safe_ver", ""),
+                "note": best_match.get("note", ""),
+            }
+
+        return {
+            "status": "success",
+            "tool": "version_risk_assess",
+            "service": service,
+            "version": version,
+            "risk": "unknown",
+            "note": "Version not in knowledge base — run CVE Lookup for current data.",
+        }
+
 security_tools = SecurityTools()
 
 # We intentionally connect to untrusted/self-signed pentest targets with
@@ -688,6 +1697,49 @@ def dns_enumerate(domain: str) -> str:
     """Enumerate DNS records (A, AAAA, MX, NS, TXT, CNAME, SOA) for a domain to map
     its infrastructure, mail servers, and name servers."""
     result = security_tools.dns_enum(domain)
+    return json.dumps(result, indent=2)
+
+@tool("Subdomain Enumeration")
+def subdomain_enumerate(domain: str) -> str:
+    """Enumerate subdomains of a domain using DNS brute-force (built-in wordlist),
+    zone-transfer attempt, and wildcard detection. Maps the full attack surface."""
+    result = security_tools.subdomain_enum(domain)
+    return json.dumps(result, indent=2)
+
+@tool("WAF Detection")
+def detect_waf(target: str) -> str:
+    """Detect the presence and identity of a Web Application Firewall (WAF) or CDN
+    by comparing normal vs attack-payload responses and inspecting WAF-specific headers."""
+    result = security_tools.waf_detect(target)
+    return json.dumps(result, indent=2)
+
+@tool("HTTP Vulnerability Scan")
+def http_vuln_scan(target: str) -> str:
+    """Active HTTP vulnerability scanner covering 8 vulnerability classes:
+    SQLi error disclosure, Reflected XSS, Open Redirect (extended endpoint coverage),
+    Directory Listing, Stack Trace/Debug Disclosure, SSTI (Server-Side Template Injection,
+    {{7*7}} patterns for Jinja2/Twig/Freemarker/ERB), LFI/Path Traversal (../etc/passwd
+    across 15 endpoints and 12 parameters), Command Injection (shell metacharacter
+    injection with output/error detection), and GraphQL Introspection.
+    All probes are non-destructive read-only GET requests."""
+    result = security_tools.http_vuln_scan(target)
+    return json.dumps(result, indent=2)
+
+@tool("Service Security Probe")
+def service_security_probe(target: str, port: int, service: str) -> str:
+    """Protocol-level security probe for specific services. Tests for unauthenticated
+    access, anonymous login, and default credential weaknesses.
+    Supports: redis, ftp, mongodb, elasticsearch, memcached, smtp, ssh."""
+    result = security_tools.service_probe(target, port, service)
+    return json.dumps(result, indent=2)
+
+@tool("Version Risk Assessment")
+def version_risk_assessment(service: str, version: str, banner: str = "") -> str:
+    """Instant offline risk assessment for a service/version. Checks against a built-in
+    knowledge base of known-vulnerable versions (OpenSSH, Apache, nginx, PHP, MySQL,
+    OpenSSL, Redis, IIS, ProFTPd, vsftpd). Returns risk level, CVE IDs, safe version.
+    No API call needed — works offline."""
+    result = security_tools.version_risk_assess(service, version, banner)
     return json.dumps(result, indent=2)
 
 

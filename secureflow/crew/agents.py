@@ -3,6 +3,8 @@ from secureflow.crew.tools import (
     run_nmap_scan, lookup_cves, assess_service,
     http_fingerprint, audit_security_headers, probe_sensitive_paths,
     inspect_tls, dns_enumerate,
+    subdomain_enumerate, detect_waf, http_vuln_scan,
+    service_security_probe, version_risk_assessment,
     save_findings_to_context, read_context_findings,
     get_all_findings, get_latest_findings
 )
@@ -44,22 +46,30 @@ class CrewAgents:
                 "Expert in port scanning, service fingerprinting, and vulnerability discovery. "
                 "Known for being thorough and meticulous - never miss open ports or vulnerable services. "
                 "\n\nYOUR EXACT WORKFLOW:\n"
-                "1. Port scan: use 'Run Nmap Scan' to discover open ports and services\n"
-                "2. DNS recon: use 'DNS Enumeration' to map A/MX/NS/TXT records and infrastructure\n"
-                "3. Web layer (if HTTP/HTTPS open):\n"
-                "   - 'HTTP Fingerprint' to identify server, CMS, frameworks\n"
-                "   - 'Audit HTTP Security Headers' to find missing protections\n"
-                "   - 'Probe Sensitive Paths' to detect exposed /.git, /.env, backups, admin\n"
-                "4. TLS (if HTTPS open): 'Inspect TLS Certificate' for expiry, self-signed, weak protocols\n"
-                "5. For each service/product, look up CVEs using 'CVE Lookup'\n"
-                "6. Save ALL findings to context with 'save_findings_to_context' key='recon_scan_results'\n"
-                "7. Return structured output: Port | Service | Version | CVEs | Risk\n"
-                "\nYour reconnaissance is the foundation for all downstream security analysis. "
-                "Never skip steps. Always save findings to shared context immediately."
+                "1. Port scan: 'Run Nmap Scan' — discover all open ports, services, versions\n"
+                "2. DNS recon: 'DNS Enumeration' — map A/MX/NS/TXT/CNAME records\n"
+                "3. Subdomain discovery: 'Subdomain Enumeration' — find hidden subdomains (attack surface)\n"
+                "4. Per-service version risk: 'Version Risk Assessment' — offline instant CVE scoring\n"
+                "5. Protocol-level probe per open service: 'Service Security Probe'\n"
+                "   — FTP (anonymous?), Redis (NOAUTH?), SMTP (VRFY enabled?), SSH (version?)\n"
+                "6. Web layer (if HTTP/HTTPS detected):\n"
+                "   a. 'WAF Detection' — is there a WAF blocking probes?\n"
+                "   b. 'HTTP Fingerprint' — server, CMS, frameworks, technologies\n"
+                "   c. 'Audit HTTP Security Headers' — HSTS, CSP, X-Frame-Options missing?\n"
+                "   d. 'HTTP Vulnerability Scan' — SQLi errors, XSS reflection, open redirect, dir listing\n"
+                "   e. 'Probe Sensitive Paths' — /.git, /.env, backups, admin, actuators\n"
+                "7. TLS (if HTTPS): 'Inspect TLS Certificate' — expiry, self-signed, weak protocol\n"
+                "8. CVE Lookup for any service with unknown version risk\n"
+                "9. Save ALL findings: 'save_findings_to_context' key='recon_scan_results'\n"
+                "10. Return structured output: Port | Service | Version | Risk | Evidence\n"
+                "\nYour recon determines what downstream agents can analyse. Be thorough — "
+                "a missed service means a missed attack path. Always save to shared context."
             ),
             tools=[
-                run_nmap_scan, dns_enumerate, http_fingerprint, audit_security_headers,
-                probe_sensitive_paths, inspect_tls, lookup_cves,
+                run_nmap_scan, dns_enumerate, subdomain_enumerate,
+                http_fingerprint, audit_security_headers, probe_sensitive_paths,
+                inspect_tls, detect_waf, http_vuln_scan,
+                service_security_probe, version_risk_assessment, lookup_cves,
                 save_findings_to_context, get_latest_findings,
             ],
             verbose=True,
