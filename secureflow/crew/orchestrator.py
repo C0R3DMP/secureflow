@@ -208,11 +208,14 @@ class CrewOrchestrator:
         """Format crew output as professional HTML report."""
         import html
         from datetime import datetime
+        # Escape both the crew output and the (attacker-influenced) target to
+        # prevent stored XSS in the generated report file.
         content = html.escape(content)
+        target = html.escape(target)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        html = f"""<!DOCTYPE html>
+        report_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -286,7 +289,7 @@ class CrewOrchestrator:
 </body>
 </html>"""
 
-        return html
+        return report_html
 
     def export_session(self) -> str:
         """Export full session summary."""

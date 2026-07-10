@@ -1,4 +1,5 @@
 import os
+import secrets
 import time
 import subprocess
 import requests
@@ -21,7 +22,10 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OPENCODE_URL = os.getenv("OPENCODE_URL", "http://localhost:4096")
-OPENCODE_SERVER_PASSWORD = os.getenv("OPENCODE_SERVER_PASSWORD", "secureflow")
+# Never fall back to a weak, publicly-known default. If the operator does not
+# supply one, generate a strong random secret for this process so the local
+# OpenCode server is not left with a guessable password.
+OPENCODE_SERVER_PASSWORD = os.getenv("OPENCODE_SERVER_PASSWORD") or secrets.token_hex(16)
 MCP_SECRET = os.getenv("MCP_SECRET", "")
 
 # Rate limit tracking

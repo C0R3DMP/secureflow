@@ -129,8 +129,11 @@ def test_get_providers_endpoint_is_async():
 def test_providers_route_runs_in_executor():
     """The provider route handler runs blocking _get_providers_dict in executor."""
     from secureflow.server import get_providers_status
+    from secureflow.config import MCP_SECRET
 
     mock_request = MagicMock()
+    # Route now requires auth — supply a valid bearer token.
+    mock_request.headers.get.return_value = f"Bearer {MCP_SECRET}"
     mock_providers = {"claude": {"available": True, "mode": "cli"}}
 
     with patch("secureflow.server._get_providers_dict", return_value=mock_providers):
@@ -138,6 +141,40 @@ def test_providers_route_runs_in_executor():
 
     body = json.loads(result.body)
     assert body == mock_providers
+
+
+def test_protected_route_rejects_missing_token():
+    """Protected routes return 401 when MCP_SECRET is set but no token is given."""
+    from secureflow.server import get_providers_status
+    from secureflow.config import MCP_SECRET
+
+    if not MCP_SECRET:
+        import pytest
+        pytest.skip("MCP_SECRET not set — auth disabled")
+
+    mock_request = MagicMock()
+    mock_request.headers.get.return_value = None
+    mock_request.query_params.get.return_value = None
+
+    result = asyncio.run(get_providers_status(mock_request))
+    assert result.status_code == 401
+
+
+def test_protected_route_rejects_bad_token():
+    """Protected routes return 401 for an invalid bearer token."""
+    from secureflow.server import get_providers_status
+    from secureflow.config import MCP_SECRET
+
+    if not MCP_SECRET:
+        import pytest
+        pytest.skip("MCP_SECRET not set — auth disabled")
+
+    mock_request = MagicMock()
+    mock_request.headers.get.return_value = "Bearer definitely-wrong-token"
+    mock_request.query_params.get.return_value = None
+
+    result = asyncio.run(get_providers_status(mock_request))
+    assert result.status_code == 401
 
 
 def test_is_port_open_with_localhost():

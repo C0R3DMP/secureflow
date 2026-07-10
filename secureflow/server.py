@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 import asyncio
+import hmac
 import json
 import logging
 import os
 import socket
 import uuid
+from functools import wraps
 from queue import Empty, Queue
 from typing import Any
 
 from fastmcp import Context, FastMCP
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from secureflow.config import MCP_SECRET
 from secureflow.crew.orchestrator import CrewOrchestrator
@@ -19,6 +21,14 @@ from secureflow.crew.tasks import create_crew
 
 # Active scan registry: scan_id → {status, target, result}
 _active_scans: dict = {}
+_MAX_ACTIVE_SCANS = 500
+
+
+def _register_scan(scan_id: str, info: dict) -> None:
+    """Record a new scan, evicting the oldest entries past the cap."""
+    _active_scans[scan_id] = info
+    while len(_active_scans) > _MAX_ACTIVE_SCANS:
+        _active_scans.pop(next(iter(_active_scans)))
 
 # OpenCode process tracker for start/stop control
 _opencode_process: Any = None
@@ -50,12 +60,40 @@ def check_auth(auth_header: str = None) -> bool:
         raise AuthError("Invalid Authorization header format")
 
     token = auth_header[7:]
-    expected_token = MCP_SECRET
 
-    if token != expected_token:
+    # Constant-time comparison to avoid timing attacks. Compare bytes so a
+    # non-ASCII token can't raise TypeError (compare_digest rejects non-ASCII str).
+    if not hmac.compare_digest(token.encode("utf-8"), MCP_SECRET.encode("utf-8")):
         raise AuthError("Invalid bearer token")
 
     return True
+
+
+def require_auth(handler):
+    """Decorator enforcing bearer-token auth on a custom HTTP route.
+
+    When MCP_SECRET is unset, check_auth() returns True and the route stays
+    open (dev default). When it is set, requests without a valid token get 401.
+    """
+    @wraps(handler)
+    async def wrapper(request: Request):
+        auth_header = request.headers.get("Authorization")
+        # EventSource (SSE) cannot set custom headers, so also accept the token
+        # via a ?token= query parameter as a fallback.
+        if not auth_header:
+            token = request.query_params.get("token")
+            if token:
+                auth_header = f"Bearer {token}"
+        try:
+            check_auth(auth_header)
+        except AuthError as e:
+            return JSONResponse(
+                status_code=401,
+                content={"status": "unauthorized", "error": str(e)},
+            )
+        return await handler(request)
+
+    return wrapper
 
 @app.tool()
 async def run_security_crew(target: str) -> dict:
@@ -74,7 +112,7 @@ async def run_security_crew(target: str) -> dict:
         dict with status, scan_id, findings, session log
     """
     scan_id = str(uuid.uuid4())
-    _active_scans[scan_id] = {"status": "running", "target": target}
+    _register_scan(scan_id, {"status": "running", "target": target})
     logger.info(f"🚀 Starting security crew for target: {target} (scan_id={scan_id})")
 
     try:
@@ -226,6 +264,7 @@ async def run_security_crew_stream(target: str, ctx: Context) -> dict:
 
 
 @app.custom_route("/stream/{target:path}", methods=["GET"])
+@require_auth
 async def stream_scan_sse(request: Request) -> StreamingResponse:
     """
     HTTP SSE endpoint — streams security scan progress as Server-Sent Events.
@@ -304,7 +343,7 @@ async def run_dev_crew(task: str, language: str, output_dir: str = "/tmp/dev_out
         dict with status, scan_id, architecture, code, review findings, and output directory
     """
     scan_id = str(uuid.uuid4())
-    _active_scans[scan_id] = {"status": "running", "task": task}
+    _register_scan(scan_id, {"status": "running", "task": task})
     logger.info(f"🚀 Starting development crew for task: {task} (scan_id={scan_id})")
 
     try:
@@ -433,6 +472,7 @@ async def serve_dashboard_assets(request: Request):
     return FileResponse(status_code=404, content=b"Not found")
 
 @app.custom_route("/api/reports/export", methods=["GET"])
+@require_auth
 async def export_report(request: Request):
     """
     Export a completed scan report in the requested format.
@@ -554,6 +594,7 @@ def _get_providers_dict() -> dict:
 
 
 @app.custom_route("/api/providers", methods=["GET"])
+@require_auth
 async def get_providers_status(request: Request):
     """Get status of all LLM providers."""
     from starlette.responses import JSONResponse
@@ -571,6 +612,7 @@ async def get_providers_status(request: Request):
 
 
 @app.custom_route("/api/scans/{scan_id}", methods=["GET"])
+@require_auth
 async def get_scan_status(request: Request):
     """Get status of a specific scan by scan_id."""
     from starlette.responses import JSONResponse
@@ -583,6 +625,7 @@ async def get_scan_status(request: Request):
 
 
 @app.custom_route("/api/schedules", methods=["GET"])
+@require_auth
 async def get_schedules(request: Request):
     """List all scheduled scans."""
     from starlette.responses import JSONResponse
@@ -595,6 +638,7 @@ async def get_schedules(request: Request):
 
 
 @app.custom_route("/api/history", methods=["GET"])
+@require_auth
 async def get_scan_history(request: Request):
     """Get scan history from persistent storage."""
     from starlette.responses import JSONResponse
@@ -625,6 +669,7 @@ async def get_scan_history(request: Request):
         )
 
 @app.custom_route("/api/claude-cli-status", methods=["GET"])
+@require_auth
 async def check_claude_cli_status(request: Request):
     """Check if Claude CLI is available."""
     from starlette.responses import JSONResponse
@@ -656,6 +701,7 @@ async def check_claude_cli_status(request: Request):
         })
 
 @app.custom_route("/api/opencode/start", methods=["POST"])
+@require_auth
 async def start_opencode_server(request: Request):
     """Start the OpenCode server on port 4096."""
     from starlette.responses import JSONResponse
@@ -672,7 +718,7 @@ async def start_opencode_server(request: Request):
         from secureflow.config import OPENCODE_SERVER_PASSWORD
         _opencode_process = subprocess.Popen(
             ["opencode", "serve", "--port", "4096"],
-            env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
+            env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -686,6 +732,7 @@ async def start_opencode_server(request: Request):
 
 
 @app.custom_route("/api/opencode/stop", methods=["POST"])
+@require_auth
 async def stop_opencode_server(request: Request):
     """Stop the OpenCode server."""
     from starlette.responses import JSONResponse
@@ -711,22 +758,27 @@ async def stop_opencode_server(request: Request):
 
 
 @app.custom_route("/api/settings", methods=["POST"])
+@require_auth
 async def save_settings(request: Request):
     """Save provider settings to environment."""
     from starlette.responses import JSONResponse
     from pathlib import Path
 
+    def _clean(value: str) -> str:
+        # Strip CR/LF so a crafted value can't inject extra .env lines.
+        return str(value).replace("\r", "").replace("\n", "").strip()
+
     try:
         body = await request.json()
 
-        # Extract settings
-        claude_key = body.get("claudeKey", "")
-        claude_mode = body.get("claudeMode", "api")
-        gemini_key = body.get("geminiKey", "")
-        gemini_model = body.get("geminiModel", "gemini-2.5-flash")
-        openrouter_key = body.get("openrouterKey", "")
-        openrouter_model = body.get("openrouterModel", "")
-        ollama_url = body.get("ollamaUrl", "http://localhost:11434")
+        # Extract settings (sanitized to prevent .env line injection)
+        claude_key = _clean(body.get("claudeKey", ""))
+        claude_mode = _clean(body.get("claudeMode", "api"))
+        gemini_key = _clean(body.get("geminiKey", ""))
+        gemini_model = _clean(body.get("geminiModel", "gemini-2.5-flash"))
+        openrouter_key = _clean(body.get("openrouterKey", ""))
+        openrouter_model = _clean(body.get("openrouterModel", ""))
+        ollama_url = _clean(body.get("ollamaUrl", "http://localhost:11434"))
 
         # Update environment
         import os
@@ -805,7 +857,7 @@ def main():
             logger.info("Attempting to start OpenCode server...")
             _opencode_process = subprocess.Popen(
                 ["opencode", "serve", "--port", "4096"],
-                env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD or "secureflow"},
+                env={**os.environ, "OPENCODE_SERVER_PASSWORD": OPENCODE_SERVER_PASSWORD},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )

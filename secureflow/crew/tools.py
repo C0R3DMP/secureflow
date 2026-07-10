@@ -24,6 +24,18 @@ _SERVICE_NAMES = {
 }
 
 
+# Valid target: hostname, IPv4/IPv6, CIDR, or hyphenated range.
+# Must NOT start with '-' (prevents nmap option/argument injection).
+_TARGET_RE = re.compile(r"^(?!-)[A-Za-z0-9._:/-]+$")
+
+
+def _validate_target(target: str) -> bool:
+    """Reject empty, over-long, or option-like targets before shelling out."""
+    if not target or len(target) > 253:
+        return False
+    return bool(_TARGET_RE.match(target))
+
+
 class SecurityTools:
     """Security scanning and lookup tools for the crew."""
 
@@ -37,6 +49,15 @@ class SecurityTools:
         Primary: nmap -Pn -sV --top-ports=50
         Fallback: socket-based scanner if nmap unavailable or times out.
         """
+        if not _validate_target(target):
+            return {
+                "status": "error",
+                "scanner": "nmap",
+                "target": target,
+                "message": "Invalid target: must be a hostname, IP, or CIDR and "
+                           "must not begin with '-'.",
+            }
+
         try:
             cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
