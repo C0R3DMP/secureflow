@@ -8,6 +8,8 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from secureflow.security import validate_target
+
 logger = logging.getLogger(__name__)
 
 _SCHEDULES_DB = str(Path.home() / ".secureflow" / "schedules.db")
@@ -71,8 +73,11 @@ class ScheduleManager:
             Job ID string.
 
         Raises:
-            ValueError: If cron expression is invalid.
+            ValueError: If the cron expression or the target is invalid.
         """
+        # Validate before persisting: a bad target would otherwise sit in the
+        # job store and fail on every future firing.
+        target = validate_target(target)
         trigger = _parse_cron(cron)
         job = self._scheduler.add_job(
             _run_scheduled_scan,

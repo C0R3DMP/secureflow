@@ -7,26 +7,34 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
-from queue import Queue
+from queue import Empty, Queue
 from secureflow.crew.memory import SharedContext
 from secureflow.crew.tasks import create_crew
 from secureflow.crew.history import SessionHistory
+from secureflow.security import report_stem, validate_target
 
 _DEFAULT_LOG = str(Path.home() / ".secureflow" / "crew_session.log")
 
-# Global message queue for SSE streaming
+# Legacy process-wide queue. Retained so existing callers keep working, but each
+# orchestrator now owns its own queue (see CrewOrchestrator.message_queue) —
+# with a single shared queue, concurrent scans stole each other's events.
 _message_queue: Queue = Queue()
 
 def get_message_queue() -> Queue:
-    """Get the global message queue for SSE streaming."""
+    """Get the legacy process-wide message queue.
+
+    Prefer ``CrewOrchestrator.message_queue`` — a per-scan queue that does not
+    interleave events between concurrent assessments.
+    """
     return _message_queue
 
-def clear_message_queue() -> None:
-    """Clear all messages from the queue."""
-    while not _message_queue.empty():
+def clear_message_queue(queue: Optional[Queue] = None) -> None:
+    """Drain a message queue (defaults to the legacy process-wide one)."""
+    target_queue = _message_queue if queue is None else queue
+    while not target_queue.empty():
         try:
-            _message_queue.get_nowait()
-        except:
+            target_queue.get_nowait()
+        except Empty:
             break
 
 
@@ -39,23 +47,36 @@ class CrewOrchestrator:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         self.logger = self._init_logger()
         self.target: Optional[str] = None
+        # Per-scan event stream; isolated from other concurrent scans.
+        self.message_queue: Queue = Queue()
 
     def _init_logger(self) -> logging.Logger:
-        """Initialize logging for crew collaboration."""
+        """Initialize logging for crew collaboration.
+
+        Handlers are attached once per (logger, log_path). Re-attaching on every
+        instantiation duplicated every log line and leaked a file handle per scan.
+        """
         logger = logging.getLogger("CrewOrchestrator")
         logger.setLevel(logging.INFO)
 
-        handler = logging.FileHandler(self.log_path)
+        marker = f"secureflow:{self.log_path}"
+        if any(getattr(h, "_secureflow_marker", None) == marker for h in logger.handlers):
+            return logger
+
         formatter = logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+
+        handler = logging.FileHandler(self.log_path)
         handler.setFormatter(formatter)
+        handler._secureflow_marker = marker
         logger.addHandler(handler)
 
         # Also console output
         console = logging.StreamHandler()
         console.setFormatter(formatter)
+        console._secureflow_marker = marker
         logger.addHandler(console)
 
         return logger
@@ -64,11 +85,40 @@ class CrewOrchestrator:
         """Log a message at the given level."""
         getattr(self.logger, level.lower())(message)
 
+    def _emit_findings(self) -> None:
+        """Publish the current severity tally to the event stream.
+
+        These counts come from CVSS baseSeverity values returned by NVD, so the
+        dashboard reports measured findings rather than counting severity words
+        in the agents' prose.
+        """
+        try:
+            from secureflow.crew.tools import security_tools
+            counts = security_tools.severity_counts()
+            if any(counts.values()):
+                self.message_queue.put({
+                    'event': 'findings',
+                    'counts': counts,
+                    'timestamp': datetime.now().isoformat(),
+                })
+        except Exception as exc:  # never let telemetry break a scan
+            self.log("WARN", f"Could not emit findings tally: {exc}")
+
     def run_security_crew(self, target: str) -> Dict[str, Any]:
         """Run full security crew (recon → analysis → reporting) as a single unified Crew."""
+        try:
+            target = validate_target(target)
+        except Exception as exc:
+            self.log("ERROR", f"Rejected invalid target {target!r}: {exc}")
+            return {"success": False, "error": str(exc), "session_log": self.log_path}
+
         self.target = target
         self.context.clear()
-        clear_message_queue()
+        clear_message_queue(self.message_queue)
+
+        # Reset the structured findings tally for this scan.
+        from secureflow.crew.tools import security_tools
+        security_tools.clear_findings()
 
         self.log("INFO", f"🚀 Starting security crew for target: {target}")
         self.log("INFO", "=" * 70)
@@ -92,12 +142,13 @@ class CrewOrchestrator:
                         agent_role = 'system'
 
                     step_text = str(step)[:300]
-                    _message_queue.put({
+                    self.message_queue.put({
                         'type': 'agent_message',
                         'agent': agent_role,
                         'message': step_text,
                         'timestamp': datetime.now().isoformat()
                     })
+                    self._emit_findings()
                 except Exception as e:
                     self.log("WARN", f"Error in step callback: {str(e)}")
 
@@ -118,10 +169,15 @@ class CrewOrchestrator:
                     else:
                         agent_role = 'system'
 
-                    output_text = str(task_output.raw_output) if hasattr(task_output, 'raw_output') else str(task_output)
+                    # CrewAI's TaskOutput exposes `.raw`; `.raw_output` was the
+                    # pre-1.x name and is absent on current versions.
+                    raw = getattr(task_output, 'raw', None)
+                    if raw is None:
+                        raw = getattr(task_output, 'raw_output', None)
+                    output_text = str(raw) if raw is not None else str(task_output)
                     message = output_text[:500] if len(output_text) > 500 else output_text
 
-                    _message_queue.put({
+                    self.message_queue.put({
                         'type': 'agent_message',
                         'agent': agent_role,
                         'message': message,
@@ -132,6 +188,7 @@ class CrewOrchestrator:
 
             crew = create_crew(target, task_callback=_on_task_complete, step_callback=_on_step_complete)
             result = crew.kickoff()
+            self._emit_findings()
 
             self.context.write("session", "target", target)
             self.context.write("session", "result", str(result))
@@ -145,8 +202,9 @@ class CrewOrchestrator:
             report_content = str(result)
             report_html = self._format_report(target, report_content)
 
-            # Save report to file
-            report_path = Path(self.log_path).parent / f"report_{target.replace('/', '_')}.html"
+            # Save report to file. The stem comes from the shared helper so the
+            # /api/reports/export lookup resolves to the same filename.
+            report_path = Path(self.log_path).parent / f"report_{report_stem(target)}.html"
             with open(report_path, 'w') as f:
                 f.write(report_html)
             self.log("INFO", f"Report saved to: {report_path}")
@@ -206,13 +264,15 @@ class CrewOrchestrator:
 
     def _format_report(self, target: str, content: str) -> str:
         """Format crew output as professional HTML report."""
-        import html
-        from datetime import datetime
-        content = html.escape(content)
+        import html as html_lib
+
+        content = html_lib.escape(content)
+        # The target reaches the document too — escape it rather than trusting it.
+        target = html_lib.escape(str(target))
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        html = f"""<!DOCTYPE html>
+        document = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -286,7 +346,7 @@ class CrewOrchestrator:
 </body>
 </html>"""
 
-        return html
+        return document
 
     def export_session(self) -> str:
         """Export full session summary."""

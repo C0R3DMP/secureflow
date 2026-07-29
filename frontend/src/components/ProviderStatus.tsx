@@ -1,148 +1,136 @@
-import { CheckCircle2, AlertCircle, XCircle, RefreshCw, Play, Square } from 'lucide-react'
-import { Badge } from './Badge'
-import type { Provider } from '../types'
-import clsx from 'clsx'
 import { useState } from 'react'
+import { CircleDashed, Play, Square } from 'lucide-react'
+import clsx from 'clsx'
+import { authFetch } from '../lib/auth'
+import type { Provider } from '../types'
 
-const providerEmojis = {
-  claude: '🤖',
-  gemini: '✨',
-  openrouter: '🌐',
-  ollama: '🦙',
-  opencode: '💻',
+const PROVIDER_LABEL: Record<Provider['name'], string> = {
+  claude: 'Claude',
+  gemini: 'Gemini',
+  openrouter: 'OpenRouter',
+  ollama: 'Ollama',
+  opencode: 'OpenCode',
+}
+
+const STATUS: Record<Provider['status'], { label: string; dot: string; text: string }> = {
+  available: { label: 'Online', dot: 'bg-severity-none', text: 'text-severity-none' },
+  limited: { label: 'Limited', dot: 'bg-severity-medium', text: 'text-severity-medium' },
+  unavailable: { label: 'Offline', dot: 'bg-ink-muted/50', text: 'text-muted' },
+  unknown: { label: 'Checking', dot: 'bg-ink-muted/40', text: 'text-muted' },
 }
 
 interface ProviderStatusProps {
   providers: Provider[]
-  onTest?: (name: string) => void
+  onRefresh?: () => void
 }
 
-export function ProviderStatus({ providers, onTest }: ProviderStatusProps) {
-  const [testing, setTesting] = useState<string | null>(null)
-  const [_starting, setStarting] = useState(false)
-  const [_stopping, setStopping] = useState(false)
+export function ProviderStatus({ providers, onRefresh }: ProviderStatusProps) {
+  const [busy, setBusy] = useState<'start' | 'stop' | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleTest = async (name: string) => {
-    setTesting(name)
-    onTest?.(name)
-    setTimeout(() => setTesting(null), 2000)
-  }
-
-  const handleStartOpenCode = async () => {
-    setStarting(true)
+  const controlOpenCode = async (action: 'start' | 'stop') => {
+    setBusy(action)
+    setError(null)
     try {
-      await fetch('/api/opencode/start', { method: 'POST' })
-      setTimeout(() => window.location.reload(), 1000)
+      const response = await authFetch(`/api/opencode/${action}`, { method: 'POST' })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        setError(body.message ?? `Could not ${action} OpenCode`)
+        return
+      }
+      // Give the process a moment to bind its port, then re-poll — far less
+      // disruptive than the full window.location.reload() this used to do.
+      setTimeout(() => onRefresh?.(), 900)
     } catch {
-      alert('Failed to start OpenCode server')
+      setError(`Could not reach the server to ${action} OpenCode`)
     } finally {
-      setStarting(false)
+      setBusy(null)
     }
   }
 
-  const handleStopOpenCode = async () => {
-    setStopping(true)
-    try {
-      await fetch('/api/opencode/stop', { method: 'POST' })
-      setTimeout(() => window.location.reload(), 1000)
-    } catch {
-      alert('Failed to stop OpenCode server')
-    } finally {
-      setStopping(false)
-    }
-  }
+  const online = providers.filter((p) => p.status === 'available').length
+  const settled = providers.some((p) => p.status !== 'unknown')
 
   return (
-    <div className="space-y-2">
-      {providers.map((provider) => (
-        <div
-          key={provider.name}
-          className={clsx(
-            'flex items-center justify-between p-3 rounded-lg border transition-colors',
-            provider.status === 'available'
-              ? 'border-success/30 bg-success/5'
-              : provider.status === 'limited'
-              ? 'border-yellow-500/30 bg-yellow-500/5'
-              : 'border-destructive/30 bg-destructive/5',
-          )}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-lg">
-              {providerEmojis[provider.name]}
-            </span>
-            <div>
-              <p className="text-sm font-semibold capitalize text-foreground">
-                {provider.name}
+    <div>
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="label-caps">Providers</span>
+        <span className="tabular text-xs text-muted">
+          {settled ? `${online}/${providers.length} online` : 'checking…'}
+        </span>
+      </div>
+
+      <ul className="space-y-px">
+        {providers.map((provider) => {
+          const status = STATUS[provider.status] ?? STATUS.unknown
+          return (
+            <li
+              key={provider.name}
+              className="flex items-center gap-2.5 rounded-sm px-1.5 py-1.5 hover:bg-surface-2"
+            >
+              <span
+                className={clsx(
+                  'dot',
+                  status.dot,
+                  provider.status === 'unknown' && 'dot-live',
+                )}
+                aria-hidden="true"
+              />
+
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-ink">
+                {PROVIDER_LABEL[provider.name]}
                 {provider.mode && (
-                  <span className="text-xs font-normal ml-2 text-muted-foreground">
-                    ({provider.mode})
+                  <span className="ml-1.5 font-mono text-[0.6875rem] text-muted">
+                    {provider.mode}
                   </span>
                 )}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Priority: #{provider.priority}
-              </p>
-            </div>
-          </div>
+              </span>
 
-          <div className="flex items-center gap-2">
-            {provider.status === 'available' && (
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            )}
-            {provider.status === 'limited' && (
-              <AlertCircle className="h-5 w-5 text-yellow-500" />
-            )}
-            {provider.status === 'unavailable' && (
-              <XCircle className="h-5 w-5 text-destructive" />
-            )}
+              {/* Status is spelled out, so the dot's colour is reinforcement. */}
+              <span className={clsx('shrink-0 text-[0.6875rem]', status.text)}>
+                {status.label}
+              </span>
 
-            <Badge
-              variant={
-                provider.status === 'available'
-                  ? 'success'
-                  : provider.status === 'limited'
-                  ? 'warning'
-                  : 'destructive'
-              }
-            >
-              {provider.status}
-            </Badge>
-
-            <button
-              onClick={() => handleTest(provider.name)}
-              disabled={testing === provider.name}
-              className={clsx(
-                'p-1 rounded hover:bg-primary/20 transition-colors disabled:opacity-50',
-                testing === provider.name && 'animate-spin',
+              {provider.name === 'opencode' && (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    onClick={() => controlOpenCode('start')}
+                    disabled={busy !== null || provider.status === 'available'}
+                    className="icon-btn h-6 w-6 disabled:opacity-30"
+                    aria-label="Start OpenCode server"
+                    title="Start OpenCode"
+                  >
+                    {busy === 'start' ? (
+                      <CircleDashed className="h-3 w-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Play className="h-3 w-3" aria-hidden="true" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => controlOpenCode('stop')}
+                    disabled={busy !== null || provider.status !== 'available'}
+                    className="icon-btn h-6 w-6 disabled:opacity-30"
+                    aria-label="Stop OpenCode server"
+                    title="Stop OpenCode"
+                  >
+                    {busy === 'stop' ? (
+                      <CircleDashed className="h-3 w-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Square className="h-3 w-3" aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
               )}
-              title="Test connection"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
+            </li>
+          )
+        })}
+      </ul>
 
-            {provider.name === 'opencode' && (
-              <>
-                <button
-                  onClick={handleStartOpenCode}
-                  disabled={_starting}
-                  className="p-1 rounded hover:bg-green-500/20 transition-colors disabled:opacity-50"
-                  title="Start OpenCode"
-                >
-                  <Play className="h-4 w-4 text-green-400" />
-                </button>
-                <button
-                  onClick={handleStopOpenCode}
-                  disabled={_stopping}
-                  className="p-1 rounded hover:bg-red-500/20 transition-colors disabled:opacity-50"
-                  title="Stop OpenCode"
-                >
-                  <Square className="h-4 w-4 text-red-400" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      ))}
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-severity-critical">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

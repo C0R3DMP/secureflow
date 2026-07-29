@@ -6,36 +6,56 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 
+_DIST = Path(__file__).parent.parent / "secureflow" / "static" / "dist"
+
+# The React build is a generated artifact produced by ./setup-frontend.sh and is
+# not committed. Tests that inspect it are skipped when it is absent instead of
+# failing a clean checkout; the source template is asserted unconditionally below.
+requires_build = pytest.mark.skipif(
+    not (_DIST / "index.html").exists(),
+    reason="React build not present — run ./setup-frontend.sh",
+)
+
+
+def test_dashboard_source_template_exists():
+    """The frontend entry template ships in the repo and declares a React root."""
+    index_html = Path(__file__).parent.parent / "frontend" / "index.html"
+    assert index_html.exists(), "frontend/index.html missing from repository"
+
+    content = index_html.read_text()
+    assert "SecureFlow" in content, "Missing title"
+    assert 'id="root"' in content, "Missing React root div"
+
+
+@requires_build
 def test_ui_dashboard_exists():
     """Test that dashboard HTML file exists (React build)."""
-    dashboard_path = Path(__file__).parent.parent / "secureflow" / "static" / "dist" / "index.html"
-    assert dashboard_path.exists(), "Dashboard React build not found"
+    assert (_DIST / "index.html").exists(), "Dashboard React build not found"
 
 
+@requires_build
 def test_dashboard_html_contains_required_elements():
     """Test that dashboard has required UI elements (React build)."""
-    dashboard_path = Path(__file__).parent.parent / "secureflow" / "static" / "dist" / "index.html"
-    with open(dashboard_path, 'r') as f:
-        content = f.read()
+    content = (_DIST / "index.html").read_text()
 
     # Check for required elements in React build
     assert '<title>SecureFlow' in content, "Missing title"
     assert 'root' in content, "Missing React root div"
 
 
+@requires_build
 def test_dashboard_sse_endpoint_referenced():
     """Test that dashboard references correct SSE endpoint (via JS)."""
     # Check that the assets directory exists and contains JS files
-    assets_path = Path(__file__).parent.parent / "secureflow" / "static" / "dist" / "assets"
-    js_files = list(assets_path.glob("*.js"))
+    js_files = list((_DIST / "assets").glob("*.js"))
     assert len(js_files) > 0, "Missing JavaScript assets"
 
 
+@requires_build
 def test_dashboard_history_api_referenced():
     """Test that dashboard is set up for history API (React build exists)."""
     # React build exists and will handle API calls
-    dashboard_path = Path(__file__).parent.parent / "secureflow" / "static" / "dist" / "index.html"
-    assert dashboard_path.exists(), "Missing React dashboard for history API"
+    assert (_DIST / "index.html").exists(), "Missing React dashboard for history API"
 
 
 def test_session_history_records_security_scan():

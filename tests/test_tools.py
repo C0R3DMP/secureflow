@@ -53,15 +53,17 @@ def test_plan_structure_tool():
     assert result["status"] == "success"
 
 
-def test_write_code_tool():
-    """Test write_code tool implementation."""
+def test_check_syntax_tool():
+    """check_syntax replaced write_code/test_code, which returned canned output."""
     from secureflow.crew.tools import DevTools
 
     tools = DevTools()
-    result = tools.write_code_impl("Calculate fibonacci", "python")
+    result = tools.check_syntax_impl("def fib(n):\n    return n", "python")
     assert isinstance(result, dict)
-    assert "code" in result
     assert result["status"] == "success"
+    assert result["syntax_valid"] is True
+    # It must not imply that any test suite executed.
+    assert result["tests_executed"] == 0
 
 
 def test_review_code_tool():

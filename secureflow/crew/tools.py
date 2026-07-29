@@ -1,11 +1,15 @@
 import socket
 import subprocess
 import json
+import threading
 import time
 import requests
 from typing import Dict, List, Any
 import re
 from crewai.tools import tool
+
+from secureflow.analysis import analyse_python, review_metrics, syntax_check
+from secureflow.security import InvalidTarget, validate_target
 
 # Common ports for socket fallback scanner
 _COMMON_PORTS = [
@@ -24,24 +28,136 @@ _SERVICE_NAMES = {
 }
 
 
+# Vendor prefixes for the products we most often fingerprint. NVD CPEs are
+# vendor-qualified, so a bare product name will not match.
+_CPE_VENDORS = {
+    "openssh": "openbsd", "ssh": "openbsd",
+    "apache": "apache", "httpd": "apache", "tomcat": "apache",
+    "nginx": "nginx", "mysql": "oracle", "mariadb": "mariadb",
+    "postgresql": "postgresql", "redis": "redis", "mongodb": "mongodb",
+    "vsftpd": "vsftpd", "proftpd": "proftpd", "samba": "samba",
+    "openssl": "openssl", "bind": "isc", "dovecot": "dovecot",
+    "postfix": "postfix", "exim": "exim", "php": "php",
+}
+
+
+def _cpe_for(product: str, version: str) -> str:
+    """Build a CPE 2.3 match string for an NVD virtualMatchString query."""
+    name = re.sub(r"[^a-z0-9_.-]", "_", str(product).strip().lower())
+    ver = re.sub(r"[^a-z0-9_.-]", "_", str(version).strip().lower())
+    vendor = _CPE_VENDORS.get(name, name)
+    return f"cpe:2.3:a:{vendor}:{name}:{ver}"
+
+
+_SEVERITY_LEVELS = ("critical", "high", "medium", "low")
+
+
+def _normalise_severity(value: Any) -> Any:
+    """Map an NVD baseSeverity or internal risk level onto our four levels."""
+    text = str(value or "").strip().lower()
+    return text if text in _SEVERITY_LEVELS else None
+
+
+def _parse_cve(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract id, description and the best available CVSS score."""
+    cve = entry.get("cve", {}) or {}
+    descriptions = cve.get("descriptions") or []
+    english = next(
+        (d.get("value", "") for d in descriptions if d.get("lang") == "en"),
+        descriptions[0].get("value", "") if descriptions else "",
+    )
+
+    # Prefer CVSS v3.1, then v3.0, then v2 — the old code read only v3.1 and
+    # indexed [0] on a possibly-empty list, scoring everything else as 0.
+    metrics = cve.get("metrics", {}) or {}
+    score, severity, version_used = 0, "UNKNOWN", None
+    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+        entries = metrics.get(key) or []
+        if not entries:
+            continue
+        data = entries[0].get("cvssData", {}) or {}
+        score = data.get("baseScore", 0) or 0
+        severity = (
+            data.get("baseSeverity")
+            or entries[0].get("baseSeverity")
+            or "UNKNOWN"
+        )
+        version_used = key
+        break
+
+    return {
+        "id": cve.get("id", ""),
+        "description": english,
+        "score": score,
+        "severity": severity,
+        "cvss_version": version_used,
+    }
+
+
 class SecurityTools:
     """Security scanning and lookup tools for the crew."""
 
+    # Minimum seconds between outbound NVD API calls (public tier is 5 req/30s).
+    NVD_MIN_INTERVAL = 3.0
+
     def __init__(self):
         self.cve_cache = {}
-        self.last_api_call = 0
+        self.last_api_call = 0.0
+        # Structured findings recorded during a scan. These come from real CVSS
+        # data returned by NVD — the dashboard summarises these rather than
+        # counting severity words in the agents' prose.
+        self._findings: List[Dict[str, Any]] = []
+        self._findings_lock = threading.Lock()
+
+    def record_finding(self, severity: str, source: str, reference: str = "") -> None:
+        """Record one severity-rated finding for the current scan."""
+        level = _normalise_severity(severity)
+        if level is None:
+            return
+        with self._findings_lock:
+            self._findings.append(
+                {"severity": level, "source": source, "reference": reference}
+            )
+
+    def severity_counts(self) -> Dict[str, int]:
+        """Deduplicated counts by severity, keyed on the finding reference."""
+        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        seen = set()
+        with self._findings_lock:
+            for finding in self._findings:
+                key = finding["reference"] or f"{finding['source']}:{finding['severity']}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                counts[finding["severity"]] += 1
+        return counts
+
+    def clear_findings(self) -> None:
+        with self._findings_lock:
+            self._findings.clear()
 
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
         Scan target for open ports and services.
         Primary: nmap -Pn -sV --top-ports=50
         Fallback: socket-based scanner if nmap unavailable or times out.
+
+        The target is validated first: an unvalidated value beginning with '-'
+        is parsed by nmap as an option, not a host, which turns this into an
+        argument-injection sink (e.g. '--script=/tmp/evil.nse').
         """
+        try:
+            target = validate_target(target)
+        except InvalidTarget as exc:
+            return {"status": "error", "scanner": "none", "target": target, "message": str(exc)}
+
         try:
             cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
                 cmd.append("-v")
-            cmd.append(target)
+            # '--' terminates option parsing so the target can never be read
+            # as a flag, even if validation is ever loosened.
+            cmd.extend(["--", target])
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60
@@ -72,6 +188,11 @@ class SecurityTools:
     def _socket_scan(self, target: str, timeout: float = 1.0) -> Dict[str, Any]:
         """Lightweight socket-based port scanner — no external dependencies."""
         open_ports = []
+        try:
+            target = validate_target(target)
+        except InvalidTarget as exc:
+            return {"status": "error", "scanner": "socket", "message": str(exc)}
+
         try:
             host = socket.gethostbyname(target)
         except socket.gaierror as e:
@@ -123,62 +244,82 @@ class SecurityTools:
     def lookup_cve(self, product: str, version: str = "") -> Dict[str, Any]:
         """
         Look up CVEs for a product/version via NVD API.
-        Includes rate limiting (3s between requests).
+        Rate limited to one request per NVD_MIN_INTERVAL seconds.
         """
         cache_key = f"{product}:{version}"
         if cache_key in self.cve_cache:
             return self.cve_cache[cache_key]
 
-        time.sleep(3)
+        # Sleep only for the time still owed since the last call, rather than a
+        # flat 3s on every lookup. `last_api_call` was previously recorded but
+        # never read, so the throttle always paid full price.
+        elapsed = time.time() - self.last_api_call
+        remaining = self.NVD_MIN_INTERVAL - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
         self.last_api_call = time.time()
 
-        try:
-            keyword = f"{product} {version}".strip() if version else product
-            params = {"keywordSearch": keyword, "resultsPerPage": 10}
+        # NVD's keywordSearch requires *every* token to appear in the CVE text.
+        # "openssh 8.0" therefore matched nothing, so any versioned lookup
+        # silently returned zero CVEs and every service was rated "low".
+        # Query by CPE when a version is known, and fall back to a keyword
+        # search on the product alone.
+        attempts = []
+        if version:
+            attempts.append(("cpe", {"virtualMatchString": _cpe_for(product, version)}))
+        attempts.append(("keyword", {"keywordSearch": product}))
 
-            response = requests.get(
-                "https://services.nvd.nist.gov/rest/json/cves/2.0",
-                params=params,
-                timeout=15
-            )
+        last_error = None
+        for strategy, extra in attempts:
+            params = {"resultsPerPage": 10, **extra}
+            try:
+                response = requests.get(
+                    "https://services.nvd.nist.gov/rest/json/cves/2.0",
+                    params=params,
+                    timeout=15,
+                )
+            except requests.exceptions.RequestException as e:
+                last_error = f"CVE lookup failed: {e}"
+                continue
 
-            if response.status_code == 200:
-                data = response.json()
-                vulns = data.get("vulnerabilities", [])
-                result = {
-                    "status": "success",
-                    "product": product,
-                    "version": version,
-                    "cve_count": len(vulns),
-                    "cves": [
-                        {
-                            "id": v.get("cve", {}).get("id", ""),
-                            "description": (v.get("cve", {}).get("descriptions") or [{}])[0].get("value", ""),
-                            "score": (
-                                v.get("cve", {}).get("metrics", {})
-                                 .get("cvssMetricV31", [{}])[0]
-                                 .get("cvssData", {})
-                                 .get("baseScore", 0)
-                            )
-                        }
-                        for v in vulns
-                    ]
-                }
-                self.cve_cache[cache_key] = result
-                return result
-            else:
-                return {
-                    "status": "error",
-                    "message": f"NVD API returned {response.status_code}",
-                    "product": product
-                }
+            if response.status_code != 200:
+                last_error = f"NVD API returned {response.status_code}"
+                continue
 
-        except requests.exceptions.RequestException as e:
-            return {
-                "status": "error",
-                "message": f"CVE lookup failed: {str(e)}",
-                "product": product
+            data = response.json()
+            vulns = data.get("vulnerabilities", [])
+            if not vulns and strategy != attempts[-1][0]:
+                continue  # try the next strategy before giving up
+
+            cves = [_parse_cve(v) for v in vulns]
+
+            # Each CVE carries a real CVSS baseSeverity — record it so the
+            # dashboard can summarise measured findings.
+            for cve in cves:
+                self.record_finding(
+                    severity=cve.get("severity", ""),
+                    source=f"{product} {version}".strip(),
+                    reference=cve.get("id", ""),
+                )
+
+            result = {
+                "status": "success",
+                "product": product,
+                "version": version,
+                "match_strategy": strategy,
+                "cve_count": len(vulns),
+                "total_available": data.get("totalResults", len(vulns)),
+                "cves": cves,
             }
+            self.cve_cache[cache_key] = result
+            return result
+
+        return {
+            "status": "error",
+            "message": last_error or "CVE lookup failed",
+            "product": product,
+            "version": version,
+        }
 
     def assess_vulnerability(self, port: str, service: str, version: str = "") -> Dict[str, Any]:
         """
@@ -346,27 +487,6 @@ class DevTools:
         }
 
     @staticmethod
-    def write_code_impl(spec: str, language: str) -> Dict[str, Any]:
-        """Generate code implementation."""
-        return {
-            "status": "success",
-            "language": language,
-            "code": f"""
-# {language.upper()} Implementation
-# Specification: {spec[:50]}...
-
-def main():
-    '''Main application entry point'''
-    pass
-
-if __name__ == "__main__":
-    main()
-""",
-            "modules": ["main", "config", "models", "services", "utils"],
-            "note": "Full code would be generated based on detailed specifications"
-        }
-
-    @staticmethod
     def create_file_impl(filepath: str, content: str, language: str) -> Dict[str, Any]:
         """Create a file with the given content."""
         import os
@@ -392,67 +512,165 @@ if __name__ == "__main__":
             }
 
     @staticmethod
-    def test_code_impl(code: str, language: str) -> Dict[str, Any]:
-        """Test code for syntax and basic quality."""
+    def check_syntax_impl(code: str, language: str) -> Dict[str, Any]:
+        """Parse the source and report whether it is syntactically valid.
+
+        This deliberately does NOT claim that any test suite ran. The previous
+        `test_code` returned 'tests_run: 3, tests_passed: 3, coverage: 85%'
+        without executing anything, and the agent reported those numbers as fact.
+        """
+        result = syntax_check(code, language)
+        if not result.get("checked"):
+            return {
+                "status": "unsupported",
+                "language": language,
+                "tests_executed": 0,
+                "message": result.get("reason", "no parser available for this language"),
+            }
+        if result.get("valid"):
+            return {
+                "status": "success",
+                "language": language,
+                "syntax_valid": True,
+                "tests_executed": 0,
+                "message": "Source parses cleanly. No test suite was executed by this tool.",
+            }
+        err = result["error"]
         return {
-            "status": "success",
+            "status": "error",
             "language": language,
-            "tests_run": 3,
-            "tests_passed": 3,
-            "tests_failed": 0,
-            "coverage": "85%",
-            "issues": [],
-            "note": "Full testing would run actual test suite"
+            "syntax_valid": False,
+            "tests_executed": 0,
+            "error": err,
+            "message": f"Syntax error on line {err['line']}: {err['message']}",
         }
 
     @staticmethod
     def review_code_impl(code: str, language: str) -> Dict[str, Any]:
-        """Review code quality and identify issues."""
-        lines = code.split('\n')
-        issues = []
+        """Review code quality using measured metrics and AST findings."""
+        metrics = review_metrics(code, language)
+        analysis = analyse_python(code, language)
+        findings = analysis.get("findings", [])
 
-        if len(lines) > 200:
-            issues.append({"type": "complexity", "severity": "medium", "message": "Function too long"})
-        if code.count('TODO') > 0:
-            issues.append({"type": "incomplete", "severity": "low", "message": "TODO comments found"})
+        if not analysis.get("analysed") and analysis.get("status") == "unsupported":
+            return {
+                "status": "unsupported",
+                "language": language,
+                "metrics": metrics,
+                "message": analysis["message"],
+            }
+
+        # Score derived from what was actually measured, not a constant.
+        weights = {"critical": 25, "high": 15, "medium": 7, "low": 2}
+        penalty = sum(weights.get(f["severity"], 2) for f in findings)
+
+        longest = (metrics.get("longest_function") or {}).get("lines", 0)
+        if longest > 100:
+            penalty += 10
+        elif longest > 50:
+            penalty += 5
+        if metrics.get("max_nesting_depth", 0) > 4:
+            penalty += 5
+        if metrics.get("todo_markers", 0):
+            penalty += min(5, metrics["todo_markers"])
+
+        functions = metrics.get("functions", 0)
+        if functions:
+            undocumented = functions - metrics.get("documented_functions", 0)
+            penalty += min(10, undocumented * 2)
 
         return {
-            "status": "success",
+            "status": analysis.get("status", "success"),
             "language": language,
-            "lines_of_code": len(lines),
-            "issues_found": len(issues),
-            "issues": issues,
-            "quality_score": 85,
-            "maintainability_index": 75
+            "metrics": metrics,
+            "issues_found": len(findings),
+            "issues": findings,
+            "quality_score": max(0, 100 - penalty),
+            "score_basis": "100 minus weighted penalties for measured findings, size and nesting",
         }
 
     @staticmethod
     def suggest_improvements_impl(code: str, language: str) -> Dict[str, Any]:
-        """Suggest improvements for code."""
+        """Suggest improvements grounded in what the analysis actually found."""
+        metrics = review_metrics(code, language)
+        analysis = analyse_python(code, language)
+
+        if analysis.get("status") == "unsupported":
+            return {
+                "status": "unsupported",
+                "language": language,
+                "suggestions": [],
+                "message": analysis["message"],
+            }
+
+        suggestions: List[Dict[str, str]] = []
+        seen = set()
+        remedies = {
+            "code_injection": ("security", "Replace eval()/exec() with an explicit parser or a dispatch table"),
+            "command_injection": ("security", "Call subprocess with an argument list and shell=False"),
+            "sql_injection": ("security", "Use bound query parameters instead of string interpolation"),
+            "hardcoded_secret": ("security", "Move credentials to environment variables or a secret store"),
+            "unsafe_deserialization": ("security", "Use a safe loader (yaml.safe_load / json) for untrusted input"),
+            "broad_except": ("robustness", "Catch specific exception types rather than a bare except"),
+            "silent_failure": ("robustness", "Log or re-raise caught exceptions instead of discarding them"),
+            "mutable_default_arg": ("correctness", "Use None as the default and build the container inside the function"),
+            "identity_comparison": ("readability", "Use 'is None' / 'is not None' for None comparisons"),
+            "syntax_error": ("correctness", "Fix the parse error before any further review"),
+        }
+        for finding in analysis.get("findings", []):
+            kind = finding["type"]
+            if kind in seen:
+                continue
+            seen.add(kind)
+            category, text = remedies.get(kind, ("quality", f"Address the reported {kind}"))
+            suggestions.append({
+                "category": category,
+                "suggestion": text,
+                "first_seen_line": finding["line"],
+                "occurrences": sum(1 for f in analysis["findings"] if f["type"] == kind),
+            })
+
+        longest = metrics.get("longest_function")
+        if longest and longest["lines"] > 50:
+            suggestions.append({
+                "category": "readability",
+                "suggestion": f"Split {longest['name']}() — it spans {longest['lines']} lines",
+                "first_seen_line": longest["line"],
+                "occurrences": 1,
+            })
+
+        functions = metrics.get("functions", 0)
+        undocumented = functions - metrics.get("documented_functions", 0)
+        if undocumented > 0:
+            suggestions.append({
+                "category": "documentation",
+                "suggestion": f"Add docstrings to {undocumented} of {functions} functions",
+                "first_seen_line": 0,
+                "occurrences": undocumented,
+            })
+
         return {
             "status": "success",
             "language": language,
-            "suggestions": [
-                {"category": "readability", "suggestion": "Break down long functions into smaller units"},
-                {"category": "performance", "suggestion": "Consider caching frequently accessed data"},
-                {"category": "security", "suggestion": "Add input validation and sanitization"},
-                {"category": "testing", "suggestion": "Add more edge case tests"}
-            ],
-            "estimated_improvement": "30% improvement in maintainability"
+            "suggestions": suggestions,
+            "message": "No issues detected by static analysis" if not suggestions else "",
         }
 
     @staticmethod
     def find_bugs_impl(code: str, language: str) -> Dict[str, Any]:
-        """Find potential bugs in code."""
+        """Find real defects by inspecting the parsed syntax tree."""
+        analysis = analyse_python(code, language)
+        findings = analysis.get("findings", [])
+        severity = analysis.get("severity_counts", {})
+
         return {
-            "status": "success",
+            "status": analysis["status"],
             "language": language,
-            "bugs_found": 0,
-            "potential_issues": [
-                {"severity": "low", "type": "missing_error_handling", "line": "unknown"},
-                {"severity": "low", "type": "unused_variable", "line": "unknown"}
-            ],
-            "recommendation": "No critical bugs found, but review error handling"
+            "analysed": analysis.get("analysed", False),
+            "bugs_found": len(findings),
+            "severity_counts": severity,
+            "issues": findings,
+            "message": analysis.get("message", ""),
         }
 
 
@@ -476,11 +694,10 @@ def plan_structure(project_type: str, language: str) -> str:
     result = dev_tools.plan_structure_impl(project_type, language)
     return json.dumps(result, indent=2)
 
-@tool("Write Code")
-def write_code(spec: str, language: str) -> str:
-    """Generate code implementation based on specification."""
-    result = dev_tools.write_code_impl(spec, language)
-    return json.dumps(result, indent=2)
+# NOTE: there is deliberately no "Write Code" tool. It used to return a fixed
+# `def main(): pass` stub for every specification, which polluted the developer
+# agent's context with a non-answer. Writing code is what the model itself does;
+# `Create File` below persists the result.
 
 @tool("Create File")
 def create_file(filepath: str, content: str, language: str) -> str:
@@ -488,10 +705,10 @@ def create_file(filepath: str, content: str, language: str) -> str:
     result = dev_tools.create_file_impl(filepath, content, language)
     return json.dumps(result, indent=2)
 
-@tool("Test Code")
-def test_code(code: str, language: str) -> str:
-    """Test code for syntax errors and basic quality checks."""
-    result = dev_tools.test_code_impl(code, language)
+@tool("Check Syntax")
+def check_syntax(code: str, language: str) -> str:
+    """Parse code and report syntax errors. Does NOT execute any test suite."""
+    result = dev_tools.check_syntax_impl(code, language)
     return json.dumps(result, indent=2)
 
 @tool("Review Code Quality")
@@ -550,6 +767,27 @@ class ContextManager:
         try:
             ctx = ContextManager.get_context()
             findings = ctx.read(agent_name, key)
+
+            # A missing key used to return status "success" with findings=None,
+            # so an agent whose upstream handoff failed carried on as though it
+            # had data. Report the miss, and say what *is* available.
+            if findings is None:
+                available = sorted(ctx.get_all(agent_name).keys())
+                return {
+                    "status": "not_found",
+                    "agent": agent_name,
+                    "key": key,
+                    "findings": None,
+                    "available_keys": available,
+                    "message": (
+                        f"No findings stored under agent={agent_name!r} key={key!r}. "
+                        + (f"Available keys for this agent: {available}. "
+                           if available else
+                           f"This agent has written nothing yet. ")
+                        + "Do not invent results — say the upstream data is missing."
+                    ),
+                }
+
             return {
                 "status": "success",
                 "agent": agent_name,

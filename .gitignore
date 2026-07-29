@@ -65,3 +65,10 @@ coverage.xml
 dist/
 build/
 *.egg-info/
+
+# TypeScript build artifacts emitted into the source tree
+frontend/src/**/*.js
+frontend/src/**/*.js.map
+
+# Generated React build output served by the server
+secureflow/static/dist/

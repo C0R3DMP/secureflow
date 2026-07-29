@@ -16,6 +16,16 @@ if _secureflow_env.exists():
 
 logger = logging.getLogger(__name__)
 
+_SETTINGS_DEFAULTS = {
+    "GEMINI_API_KEY": "",
+    "OPENROUTER_API_KEY": "",
+    "ANTHROPIC_API_KEY": "",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OPENCODE_URL": "http://localhost:4096",
+    "OPENCODE_SERVER_PASSWORD": "secureflow",
+    "MCP_SECRET": "",
+}
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -23,6 +33,26 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OPENCODE_URL = os.getenv("OPENCODE_URL", "http://localhost:4096")
 OPENCODE_SERVER_PASSWORD = os.getenv("OPENCODE_SERVER_PASSWORD", "secureflow")
 MCP_SECRET = os.getenv("MCP_SECRET", "")
+
+
+def reload_settings() -> dict:
+    """Re-read provider settings from the environment into module globals.
+
+    These values were previously frozen at import time, so anything written by
+    the /api/settings endpoint was a no-op until the process restarted. Call
+    this after mutating os.environ (or rewriting ~/.secureflow/.env) to make new
+    credentials take effect in-process.
+    """
+    if _secureflow_env.exists():
+        load_dotenv(_secureflow_env, override=True)
+
+    updated = {}
+    for name, default in _SETTINGS_DEFAULTS.items():
+        value = os.getenv(name, default)
+        globals()[name] = value
+        updated[name] = value
+    return updated
+
 
 # Rate limit tracking
 _rate_limit_fallback = {"gemini_limited": False, "last_rate_limit_time": 0}
@@ -77,41 +107,40 @@ class LLMProviderStatus:
     4. Claude API (optional)
     """
 
+    # Static metadata only. Availability is *never* cached here: the previous
+    # version called is_ollama_available() at import time, which fired a network
+    # request on every `import secureflow.config` and then held that answer —
+    # and the API-key snapshots went stale the moment settings changed.
     PROVIDERS = {
         "gemini": {
-            "api_key_var": GEMINI_API_KEY,
+            "env_var": "GEMINI_API_KEY",
             "type": "api",
             "priority": 1,
-            "available": bool(GEMINI_API_KEY),
             "model": "gemini/gemini-2.5-flash",
         },
         "openrouter": {
-            "api_key_var": OPENROUTER_API_KEY,
+            "env_var": "OPENROUTER_API_KEY",
             "type": "api",
             "priority": 2,
-            "available": bool(OPENROUTER_API_KEY),
             "model": "openrouter/google/gemini-2.0-flash-exp:free",
             "base_url": "https://openrouter.ai/api/v1",
         },
         "ollama": {
-            "base_url": OLLAMA_BASE_URL,
+            "env_var": "OLLAMA_BASE_URL",
             "type": "local",
             "priority": 3,
-            "available": is_ollama_available(),
             "model": "ollama/qwen2.5-coder:7b",
         },
         "claude": {
-            "api_key_var": ANTHROPIC_API_KEY,
+            "env_var": "ANTHROPIC_API_KEY",
             "type": "api",
             "priority": 4,
-            "available": bool(ANTHROPIC_API_KEY),
             "model": "claude-opus-4-6",
         },
         "opencode": {
-            "base_url": OPENCODE_URL,
+            "env_var": "OPENCODE_URL",
             "type": "local",
             "priority": 5,
-            "available": False,  # Check dynamically in check_health
         },
     }
 
@@ -131,7 +160,8 @@ class LLMProviderStatus:
                 headers = {"Authorization": f"Bearer {OPENCODE_SERVER_PASSWORD}"}
                 response = requests.get(f"{OPENCODE_URL}/", headers=headers, timeout=2)
                 return 200 <= response.status_code < 400
-            except:
+            except Exception as exc:
+                logger.debug(f"OpenCode health check failed: {exc}")
                 return False
         return False
 
@@ -149,33 +179,15 @@ class LLMProviderStatus:
 # See call_claude_cli() and call_gemini_cli() below for direct CLI usage if needed
 
 
-def init_llms():
-    """Initialize litellm with fallback chain: Claude CLI → Gemini CLI → Gemini API → Ollama."""
-    config = {
-        "claude-cli": {
-            "type": "cli",
-            "model": "claude-opus-4-6",
-        },
-        "gemini-cli": {
-            "type": "cli",
-            "model": "gemini",
-        },
-        "gemini": {
-            "api_key": GEMINI_API_KEY,
-            "model": "gemini/gemini-2.5-flash",
-        },
-        "ollama": {
-            "base_url": OLLAMA_BASE_URL,
-            "model": "ollama/qwen2.5-coder",
-        },
-    }
-    return config
-
 def get_fallback_chain():
-    """Return the LLM fallback order: Gemini API → OpenRouter → Ollama → Claude API."""
-    chain = [
-        {"model": "gemini/gemini-2.5-flash"},
-    ]
+    """Return the LLM fallback order: Gemini API → OpenRouter → Ollama → Claude API.
+
+    Only providers that are actually configured are included; a chain entry for
+    an unconfigured provider just guarantees an auth failure at call time.
+    """
+    chain = []
+    if GEMINI_API_KEY:
+        chain.append({"model": "gemini/gemini-2.5-flash", "api_key": GEMINI_API_KEY})
     if OPENROUTER_API_KEY:
         chain.append({
             "model": "openrouter/google/gemini-2.0-flash-exp:free",
@@ -183,7 +195,10 @@ def get_fallback_chain():
             "base_url": "https://openrouter.ai/api/v1",
         })
     chain.append({"model": "ollama/qwen2.5-coder", "base_url": OLLAMA_BASE_URL})
-    chain.append({"model": "claude/claude-opus-4-6"})
+    if ANTHROPIC_API_KEY:
+        # litellm's Anthropic prefix is "anthropic/", not "claude/" — the old
+        # value would never have routed to a real provider.
+        chain.append({"model": "anthropic/claude-opus-4-6", "api_key": ANTHROPIC_API_KEY})
     return chain
 
 def call_claude_cli(prompt: str, model: str = "claude-opus-4-6") -> str:
@@ -489,7 +504,8 @@ def completion_with_fallback(messages, model="gemini", temperature=0.7, max_toke
         "ollama/qwen2.5-coder",
     ]
 
-    litellm.api_base_for_ollama = OLLAMA_BASE_URL
+    # (The old `litellm.api_base_for_ollama = ...` line here set an attribute
+    # litellm does not read; the Ollama base URL is passed per-call as api_base.)
 
     last_error = None
     for model_name in fallback_models:

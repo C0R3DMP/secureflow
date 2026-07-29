@@ -5,11 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from secureflow.security import report_stem
+
 _REPORT_DIR = Path.home() / ".secureflow"
 
-
-def _report_stem(target: str) -> str:
-    return target.replace("/", "_").replace(":", "_").replace(" ", "_")
+# Backwards-compatible alias. The canonical implementation lives in
+# secureflow.security so the orchestrator and the export endpoint cannot drift
+# apart again — they previously produced different filenames for the same target.
+_report_stem = report_stem
 
 
 class ReportExporter:

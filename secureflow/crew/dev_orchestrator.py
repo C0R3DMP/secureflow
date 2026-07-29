@@ -25,24 +25,33 @@ class DevOrchestrator:
         self.output_dir: Optional[str] = None
 
     def _init_logger(self) -> logging.Logger:
-        """Initialize logger for session."""
+        """Initialize logger for session.
+
+        Handlers are attached once per (logger, log_path); re-attaching on every
+        instantiation duplicated log lines and leaked a file handle per run.
+        """
         logger = logging.getLogger("DevCrew")
         logger.setLevel(logging.DEBUG)
+
+        marker = f"secureflow:{self.log_path}"
+        if any(getattr(h, "_secureflow_marker", None) == marker for h in logger.handlers):
+            return logger
+
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
 
         # File handler
         fh = logging.FileHandler(self.log_path)
         fh.setLevel(logging.DEBUG)
+        fh.setFormatter(formatter)
+        fh._secureflow_marker = marker
 
         # Console handler
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
-
-        # Formatter
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        fh.setFormatter(formatter)
         ch.setFormatter(formatter)
+        ch._secureflow_marker = marker
 
         logger.addHandler(fh)
         logger.addHandler(ch)

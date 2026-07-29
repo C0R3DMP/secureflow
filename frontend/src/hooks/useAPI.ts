@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { authHeaders } from '../lib/auth'
 
 export function useAPI<T>(
   url: string,
@@ -12,7 +13,7 @@ export function useAPI<T>(
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(url, options)
+      const response = await fetch(url, authHeaders(options))
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }
