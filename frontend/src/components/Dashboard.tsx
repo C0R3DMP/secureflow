@@ -6,6 +6,7 @@ import {
   Eraser,
   FileText,
   History,
+  MessageSquare,
   Moon,
   Play,
   Settings,
@@ -21,6 +22,7 @@ import { ProviderStatus } from './ProviderStatus'
 import { SettingsModal } from './SettingsModal'
 import { ScanHistory } from './ScanHistory'
 import { SeverityTiles } from './SeverityTiles'
+import { ChatPanel } from './ChatPanel'
 import { ReportModal } from './ReportModal'
 import { TokenGate } from './TokenGate'
 import { Badge } from './Badge'
@@ -108,6 +110,37 @@ function readCounts(raw: unknown): SeverityCounts {
   return counts
 }
 
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+  controls,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  controls: string
+}) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
+      onClick={onClick}
+      className={`flex items-center gap-1.5 rounded-sm px-2 py-1 text-[0.8125rem] font-medium transition-colors ${
+        active
+          ? 'bg-surface-2 text-ink'
+          : 'text-muted hover:bg-surface-2 hover:text-ink-secondary'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
 export function Dashboard() {
   const { theme, toggle: toggleTheme } = useTheme()
 
@@ -125,6 +158,7 @@ export function Dashboard() {
   const [severity, setSeverity] = useState<SeverityCounts>(EMPTY_COUNTS)
   const [hasFindings, setHasFindings] = useState(false)
 
+  const [bottomTab, setBottomTab] = useState<'log' | 'chat'>('log')
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showReport, setShowReport] = useState(false)
@@ -548,20 +582,53 @@ export function Dashboard() {
 
           <section className="panel flex h-[20rem] shrink-0 flex-col overflow-hidden lg:h-auto lg:min-h-[12rem] lg:shrink lg:flex-[2]">
             <div className="panel-header">
-              <h2 className="panel-title">
-                <Terminal className="h-4 w-4 text-ink-muted" aria-hidden="true" />
-                Event log
-              </h2>
-              <button
-                onClick={clearOutput}
-                className="btn btn-ghost px-2 py-1 text-xs"
-                disabled={logs.length === 0 && messages.length === 0}
-              >
-                <Eraser className="h-3.5 w-3.5" aria-hidden="true" />
-                Clear
-              </button>
+              <div className="flex items-center gap-1" role="tablist" aria-label="Output view">
+                <TabButton
+                  active={bottomTab === 'log'}
+                  onClick={() => setBottomTab('log')}
+                  icon={<Terminal className="h-3.5 w-3.5" aria-hidden="true" />}
+                  label="Event log"
+                  controls="panel-log"
+                />
+                <TabButton
+                  active={bottomTab === 'chat'}
+                  onClick={() => setBottomTab('chat')}
+                  icon={<MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />}
+                  label="Ask AI"
+                  controls="panel-chat"
+                />
+              </div>
+
+              {bottomTab === 'log' && (
+                <button
+                  onClick={clearOutput}
+                  className="btn btn-ghost px-2 py-1 text-xs"
+                  disabled={logs.length === 0 && messages.length === 0}
+                >
+                  <Eraser className="h-3.5 w-3.5" aria-hidden="true" />
+                  Clear
+                </button>
+              )}
             </div>
-            <LogViewer logs={logs} />
+
+            {/* Both panels stay mounted so switching tabs never discards an
+                in-flight reply or the accumulated log. */}
+            <div
+              id="panel-log"
+              role="tabpanel"
+              hidden={bottomTab !== 'log'}
+              className={bottomTab === 'log' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+            >
+              <LogViewer logs={logs} />
+            </div>
+            <div
+              id="panel-chat"
+              role="tabpanel"
+              hidden={bottomTab !== 'chat'}
+              className={bottomTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+            >
+              <ChatPanel target={activeTarget || undefined} />
+            </div>
           </section>
         </div>
 

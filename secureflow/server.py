@@ -763,6 +763,88 @@ async def stop_opencode_server(request: Request):
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
+@app.custom_route("/api/chat", methods=["POST"])
+async def chat(request: Request):
+    """Stream a chat reply from the configured LLM as Server-Sent Events.
+
+    Body: {"messages": [{"role": "user"|"assistant", "content": str}, ...],
+           "target": optional str — pulls that scan's findings in as context}
+
+    Events: {"type":"token","text":...} · {"type":"done"} · {"type":"error","message":...}
+    """
+    from starlette.responses import JSONResponse
+
+    from secureflow.chat import (
+        ChatError,
+        NoProviderConfigured,
+        normalise_history,
+        scan_context_for,
+        stream_reply,
+    )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "body must be valid JSON"})
+
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"error": "body must be a JSON object"})
+
+    try:
+        messages = normalise_history(body.get("messages"))
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+    # Optional grounding in a specific scan's results.
+    context = None
+    raw_target = body.get("target")
+    if raw_target:
+        try:
+            context = scan_context_for(validate_target(str(raw_target)))
+        except InvalidTarget as exc:
+            return JSONResponse(
+                status_code=400, content={"error": "invalid target", "detail": str(exc)}
+            )
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+
+    def _produce() -> None:
+        """Consume the blocking litellm stream on a worker thread."""
+        try:
+            for chunk in stream_reply(messages, context=context):
+                loop.call_soon_threadsafe(queue.put_nowait, ("token", chunk))
+        except NoProviderConfigured as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
+        except ChatError as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
+        except Exception as exc:  # unexpected — surface rather than hang
+            logger.error(f"Chat stream failed: {exc}", exc_info=True)
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", f"Unexpected error: {exc}"))
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+
+    async def _generate():
+        loop.run_in_executor(None, _produce)
+        while True:
+            item = await queue.get()
+            if item is _SENTINEL:
+                break
+            kind, payload = item
+            if kind == "token":
+                yield f"data: {json.dumps({'type': 'token', 'text': payload})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'error', 'message': payload})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.custom_route("/api/settings", methods=["POST"])
 async def save_settings(request: Request):
     """Save provider settings to environment."""

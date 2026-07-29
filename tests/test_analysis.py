@@ -406,6 +406,8 @@ def test_cve_lookup_records_real_cvss_severities(monkeypatch):
             return payload
 
     monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    # OSV is queried via POST; leaving it unstubbed lets the test hit the network.
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
 
     tools = tools_mod.SecurityTools()
@@ -443,3 +445,107 @@ def test_orchestrator_emits_nothing_when_no_findings(tmp_path):
     orch._emit_findings()
 
     assert orch.message_queue.empty()
+
+
+# ---------------------------------------------------------------------------
+# OSV complement to NVD
+# ---------------------------------------------------------------------------
+
+def test_osv_lookup_needs_a_version():
+    """Without a version there is nothing to match on; don't call the API."""
+    from secureflow.crew.tools import _osv_lookup
+
+    assert _osv_lookup("openssh", "") == []
+
+
+def test_osv_prefers_the_cve_alias_so_results_dedupe(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "vulns": [
+                    {
+                        "id": "GHSA-aaaa-bbbb-cccc",
+                        "aliases": ["CVE-2020-15778"],
+                        "summary": "scp injection",
+                        "severity": [{"type": "CVSS_V3", "score": "7.4"}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(tools_mod.requests, "post", lambda *a, **k: _Resp())
+    findings = tools_mod._osv_lookup("openssh", "8.0")
+
+    assert findings[0]["id"] == "CVE-2020-15778"
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["source"] == "osv"
+
+
+def test_osv_network_failure_is_not_fatal(monkeypatch):
+    """OSV is a complement; if it is unreachable the NVD result still stands."""
+    import secureflow.crew.tools as tools_mod
+
+    def _boom(*a, **k):
+        raise tools_mod.requests.exceptions.ConnectionError("offline")
+
+    monkeypatch.setattr(tools_mod.requests, "post", _boom)
+    assert tools_mod._osv_lookup("openssh", "8.0") == []
+
+
+def test_lookup_merges_osv_findings_without_duplicating_nvd(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    nvd_payload = {
+        "totalResults": 1,
+        "vulnerabilities": [
+            {
+                "cve": {
+                    "id": "CVE-SHARED",
+                    "descriptions": [{"lang": "en", "value": "shared"}],
+                    "metrics": {
+                        "cvssMetricV31": [
+                            {"cvssData": {"baseScore": 7.4, "baseSeverity": "HIGH"}}
+                        ]
+                    },
+                }
+            }
+        ],
+    }
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return nvd_payload
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        tools_mod,
+        "_osv_lookup",
+        lambda *a, **k: [
+            {"id": "CVE-SHARED", "severity": "high", "score": 7.4, "source": "osv"},
+            {"id": "CVE-OSV-ONLY", "severity": "critical", "score": 9.8, "source": "osv"},
+        ],
+    )
+
+    result = tools_mod.SecurityTools().lookup_cve("openssh", "8.0")
+    ids = sorted(c["id"] for c in result["cves"])
+
+    assert ids == ["CVE-OSV-ONLY", "CVE-SHARED"]
+    assert result["cve_count"] == 2
+    assert "osv" in result["sources"]
+
+
+def test_severity_label_thresholds():
+    from secureflow.crew.tools import _label_for_score
+
+    assert _label_for_score(9.8) == "critical"
+    assert _label_for_score(7.4) == "high"
+    assert _label_for_score(5.3) == "medium"
+    assert _label_for_score(2.1) == "low"
