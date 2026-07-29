@@ -44,7 +44,7 @@ class CrewAgents:
                 "\n\nYOUR EXACT WORKFLOW:\n"
                 "1. Use 'nmap_scan' tool to scan target comprehensively (top 1000+ ports)\n"
                 "2. For each open port, look up CVEs using 'lookup_cves' tool\n"
-                "3. Save ALL findings to context with 'save_findings_to_context' key='recon_scan_results'\n"
+                "3. Save ALL findings to context with 'save_findings_to_context' key='scan_results'\n"
                 "4. Return structured output: Port | Service | Version | CVEs | Risk\n"
                 "\nYour reconnaissance is the foundation for all downstream security analysis. "
                 "Never skip steps. Always save findings to shared context immediately."
@@ -69,7 +69,7 @@ class CrewAgents:
                 "Senior security analyst with 20+ years in vulnerability assessment and exploit development. "
                 "Holds OSCP, CEH, and published CVE research. Known for connecting security findings into coherent attack narratives. "
                 "\n\nYOUR EXACT WORKFLOW:\n"
-                "1. Read recon findings: read_context_findings(agent_name='recon', key='recon_scan_results')\n"
+                "1. Read recon findings: read_context_findings(agent_name='recon', key='scan_results')\n"
                 "2. For EACH service:\n"
                 "   - Use lookup_cves to find CVEs\n"
                 "   - Use assess_service to test exploitability\n"
@@ -101,7 +101,7 @@ class CrewAgents:
                 "into compelling executive narratives that drive C-suite decision-making. "
                 "\n\nYOUR EXACT REPORT STRUCTURE:\n"
                 "1. Read ALL findings from context:\n"
-                "   - read_context_findings(agent_name='recon', key='recon_scan_results')\n"
+                "   - read_context_findings(agent_name='recon', key='scan_results')\n"
                 "   - read_context_findings(agent_name='analyst', key='vulnerability_analysis')\n"
                 "2. Executive Summary (1 page, non-technical):\n"
                 "   - Risk posture, top findings, business impact, timeline\n"
@@ -169,7 +169,7 @@ class DevAgents:
     @staticmethod
     def create_developer_agent():
         """Code implementation agent (Gemini API / Ollama)."""
-        from secureflow.crew.tools import write_code, create_file, test_code
+        from secureflow.crew.tools import create_file, check_syntax
 
         return Agent(
             role="Senior Fullstack Developer",
@@ -199,7 +199,7 @@ class DevAgents:
                 "5. Save code: save_findings_to_context key='implementation_code'\n"
                 "\nWrite code you'll support for 5+ years in production. Quality is paramount."
             ),
-            tools=[write_code, create_file, test_code, read_context_findings, save_findings_to_context, get_all_findings],
+            tools=[create_file, check_syntax, read_context_findings, save_findings_to_context, get_all_findings],
             verbose=True,
             max_iter=8,
             allow_delegation=False,
