@@ -85,6 +85,25 @@ class CrewOrchestrator:
         """Log a message at the given level."""
         getattr(self.logger, level.lower())(message)
 
+    def _emit_findings(self) -> None:
+        """Publish the current severity tally to the event stream.
+
+        These counts come from CVSS baseSeverity values returned by NVD, so the
+        dashboard reports measured findings rather than counting severity words
+        in the agents' prose.
+        """
+        try:
+            from secureflow.crew.tools import security_tools
+            counts = security_tools.severity_counts()
+            if any(counts.values()):
+                self.message_queue.put({
+                    'event': 'findings',
+                    'counts': counts,
+                    'timestamp': datetime.now().isoformat(),
+                })
+        except Exception as exc:  # never let telemetry break a scan
+            self.log("WARN", f"Could not emit findings tally: {exc}")
+
     def run_security_crew(self, target: str) -> Dict[str, Any]:
         """Run full security crew (recon → analysis → reporting) as a single unified Crew."""
         try:
@@ -96,6 +115,10 @@ class CrewOrchestrator:
         self.target = target
         self.context.clear()
         clear_message_queue(self.message_queue)
+
+        # Reset the structured findings tally for this scan.
+        from secureflow.crew.tools import security_tools
+        security_tools.clear_findings()
 
         self.log("INFO", f"🚀 Starting security crew for target: {target}")
         self.log("INFO", "=" * 70)
@@ -125,6 +148,7 @@ class CrewOrchestrator:
                         'message': step_text,
                         'timestamp': datetime.now().isoformat()
                     })
+                    self._emit_findings()
                 except Exception as e:
                     self.log("WARN", f"Error in step callback: {str(e)}")
 
@@ -164,6 +188,7 @@ class CrewOrchestrator:
 
             crew = create_crew(target, task_callback=_on_task_complete, step_callback=_on_step_complete)
             result = crew.kickoff()
+            self._emit_findings()
 
             self.context.write("session", "target", target)
             self.context.write("session", "result", str(result))

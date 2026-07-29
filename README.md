@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 187 passing](https://img.shields.io/badge/tests-187%20passing-brightgreen)](#testing)
+[![Tests: 221 passing](https://img.shields.io/badge/tests-221%20passing-brightgreen)](#testing)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/secureflow/secureflow)
 
 SecureFlow is a complete AI-powered security assessment and application development platform. Multi-agent teams (Recon, Analyst, Reporter) collaborate via shared context to execute comprehensive penetration tests. Supports Claude, Gemini, and Ollama LLMs.
@@ -28,7 +28,13 @@ SecureFlow is a complete AI-powered security assessment and application developm
 - CLI interface with full command support
 - Report export (HTML, PDF, JSON)
 - Webhook notifications & scheduled scans
-- 187 automated tests, comprehensive coverage
+- 221 automated tests, comprehensive coverage
+
+### 🖥️ Dashboard
+- Live agent activity, event log with level filters, and phase progress
+- Severity summary derived from real CVSS scores returned by NVD
+- In-app report preview (rendered in a sandboxed frame) plus download
+- Light and dark themes; keyboard shortcut `⌘K` / `Ctrl+K` to focus the target field
 
 ## Quick Start
 

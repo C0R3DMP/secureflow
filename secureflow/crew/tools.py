@@ -1,6 +1,7 @@
 import socket
 import subprocess
 import json
+import threading
 import time
 import requests
 from typing import Dict, List, Any
@@ -48,6 +49,15 @@ def _cpe_for(product: str, version: str) -> str:
     return f"cpe:2.3:a:{vendor}:{name}:{ver}"
 
 
+_SEVERITY_LEVELS = ("critical", "high", "medium", "low")
+
+
+def _normalise_severity(value: Any) -> Any:
+    """Map an NVD baseSeverity or internal risk level onto our four levels."""
+    text = str(value or "").strip().lower()
+    return text if text in _SEVERITY_LEVELS else None
+
+
 def _parse_cve(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Extract id, description and the best available CVSS score."""
     cve = entry.get("cve", {}) or {}
@@ -93,6 +103,38 @@ class SecurityTools:
     def __init__(self):
         self.cve_cache = {}
         self.last_api_call = 0.0
+        # Structured findings recorded during a scan. These come from real CVSS
+        # data returned by NVD — the dashboard summarises these rather than
+        # counting severity words in the agents' prose.
+        self._findings: List[Dict[str, Any]] = []
+        self._findings_lock = threading.Lock()
+
+    def record_finding(self, severity: str, source: str, reference: str = "") -> None:
+        """Record one severity-rated finding for the current scan."""
+        level = _normalise_severity(severity)
+        if level is None:
+            return
+        with self._findings_lock:
+            self._findings.append(
+                {"severity": level, "source": source, "reference": reference}
+            )
+
+    def severity_counts(self) -> Dict[str, int]:
+        """Deduplicated counts by severity, keyed on the finding reference."""
+        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        seen = set()
+        with self._findings_lock:
+            for finding in self._findings:
+                key = finding["reference"] or f"{finding['source']}:{finding['severity']}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                counts[finding["severity"]] += 1
+        return counts
+
+    def clear_findings(self) -> None:
+        with self._findings_lock:
+            self._findings.clear()
 
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
@@ -249,6 +291,17 @@ class SecurityTools:
             if not vulns and strategy != attempts[-1][0]:
                 continue  # try the next strategy before giving up
 
+            cves = [_parse_cve(v) for v in vulns]
+
+            # Each CVE carries a real CVSS baseSeverity — record it so the
+            # dashboard can summarise measured findings.
+            for cve in cves:
+                self.record_finding(
+                    severity=cve.get("severity", ""),
+                    source=f"{product} {version}".strip(),
+                    reference=cve.get("id", ""),
+                )
+
             result = {
                 "status": "success",
                 "product": product,
@@ -256,7 +309,7 @@ class SecurityTools:
                 "match_strategy": strategy,
                 "cve_count": len(vulns),
                 "total_available": data.get("totalResults", len(vulns)),
-                "cves": [_parse_cve(v) for v in vulns],
+                "cves": cves,
             }
             self.cve_cache[cache_key] = result
             return result

@@ -307,3 +307,139 @@ def test_agents_and_tasks_agree_on_context_keys():
     assert "recon_scan_results" not in agents_src
     assert "scan_results" in agents_src
     assert "scan_results" in tasks_src
+
+
+# ---------------------------------------------------------------------------
+# Severity tally feeding the dashboard
+# ---------------------------------------------------------------------------
+
+def test_severity_counts_start_empty():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    assert tools.severity_counts() == {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+
+def test_record_finding_tallies_by_severity():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    tools.record_finding("HIGH", "openssh", "CVE-1")
+    tools.record_finding("critical", "apache", "CVE-2")
+    tools.record_finding("Medium", "apache", "CVE-3")
+
+    counts = tools.severity_counts()
+    assert counts["high"] == 1
+    assert counts["critical"] == 1
+    assert counts["medium"] == 1
+
+
+def test_findings_deduplicate_by_reference():
+    """The same CVE seen twice must not inflate the count."""
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    for _ in range(3):
+        tools.record_finding("high", "openssh", "CVE-2020-15778")
+
+    assert tools.severity_counts()["high"] == 1
+
+
+def test_unknown_severity_is_ignored_not_guessed():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    tools.record_finding("UNKNOWN", "x", "CVE-9")
+    tools.record_finding("", "y", "CVE-10")
+    tools.record_finding(None, "z", "CVE-11")
+
+    assert sum(tools.severity_counts().values()) == 0
+
+
+def test_clear_findings_resets_between_scans():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    tools.record_finding("critical", "x", "CVE-1")
+    tools.clear_findings()
+
+    assert sum(tools.severity_counts().values()) == 0
+
+
+def test_cve_lookup_records_real_cvss_severities(monkeypatch):
+    """Counts come from NVD baseSeverity, not from keywords in agent prose."""
+    import secureflow.crew.tools as tools_mod
+
+    payload = {
+        "totalResults": 2,
+        "vulnerabilities": [
+            {
+                "cve": {
+                    "id": "CVE-A",
+                    "descriptions": [{"lang": "en", "value": "a"}],
+                    "metrics": {
+                        "cvssMetricV31": [
+                            {"cvssData": {"baseScore": 9.8, "baseSeverity": "CRITICAL"}}
+                        ]
+                    },
+                }
+            },
+            {
+                "cve": {
+                    "id": "CVE-B",
+                    "descriptions": [{"lang": "en", "value": "b"}],
+                    "metrics": {
+                        "cvssMetricV31": [
+                            {"cvssData": {"baseScore": 5.3, "baseSeverity": "MEDIUM"}}
+                        ]
+                    },
+                }
+            },
+        ],
+    }
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return payload
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    tools.lookup_cve("openssh", "8.0")
+
+    counts = tools.severity_counts()
+    assert counts["critical"] == 1
+    assert counts["medium"] == 1
+    assert counts["high"] == 0
+
+
+def test_orchestrator_emits_findings_event(tmp_path, monkeypatch):
+    from secureflow.crew.orchestrator import CrewOrchestrator
+    from secureflow.crew.tools import security_tools
+
+    security_tools.clear_findings()
+    security_tools.record_finding("high", "openssh", "CVE-2020-15778")
+
+    orch = CrewOrchestrator(log_path=str(tmp_path / "c.log"))
+    orch._emit_findings()
+
+    event = orch.message_queue.get_nowait()
+    assert event["event"] == "findings"
+    assert event["counts"]["high"] == 1
+    security_tools.clear_findings()
+
+
+def test_orchestrator_emits_nothing_when_no_findings(tmp_path):
+    """An empty tally must not push a misleading all-zero summary."""
+    from secureflow.crew.orchestrator import CrewOrchestrator
+    from secureflow.crew.tools import security_tools
+
+    security_tools.clear_findings()
+    orch = CrewOrchestrator(log_path=str(tmp_path / "d.log"))
+    orch._emit_findings()
+
+    assert orch.message_queue.empty()

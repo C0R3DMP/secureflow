@@ -880,7 +880,10 @@ def main():
     """Run the FastMCP server with SSE transport."""
     import asyncio
     import subprocess
-    from secureflow.config import OPENCODE_SERVER_PASSWORD
+
+    # OPENCODE_URL is read below; importing only OPENCODE_SERVER_PASSWORD here
+    # made `secureflow server` die with NameError before it ever bound a port.
+    from secureflow.config import OPENCODE_SERVER_PASSWORD, OPENCODE_URL
     global _opencode_process
 
     secret = resolve_auth_secret()

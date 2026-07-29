@@ -1,79 +1,135 @@
-import { CheckCircle2, Circle, Loader2 } from 'lucide-react'
-import type { PhaseStatus } from '../types'
+import { useEffect, useState } from 'react'
+import { Check, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
+import type { PhaseStatus } from '../types'
+
+const PHASE_LABEL: Record<PhaseStatus['name'], string> = {
+  reconnaissance: 'Reconnaissance',
+  analysis: 'Vulnerability analysis',
+  reporting: 'Report generation',
+}
+
+const STATUS_TEXT: Record<PhaseStatus['status'], string> = {
+  pending: 'Queued',
+  running: 'In progress',
+  completed: 'Complete',
+}
 
 interface ProgressPhasesProps {
   phases: PhaseStatus[]
 }
 
+/**
+ * Vertical stepper. Each step states its status in words next to the icon, so
+ * progress is never conveyed by colour or motion alone.
+ */
 export function ProgressPhases({ phases }: ProgressPhasesProps) {
+  const done = phases.filter((p) => p.status === 'completed').length
+
   return (
-    <div className="space-y-3">
-      {phases.map((phase) => (
-        <div
-          key={phase.name}
-          className={clsx(
-            'flex items-center gap-3 p-4 rounded-lg border transition-all duration-300',
-            phase.status === 'completed'
-              ? 'border-success/50 bg-success/5'
-              : phase.status === 'running'
-              ? 'border-primary/50 bg-primary/5 shadow-lg shadow-primary/20'
-              : 'border-border bg-card/50',
-          )}
-        >
-          <div className="relative w-10 h-10 flex-shrink-0">
-            {phase.status === 'completed' && (
-              <CheckCircle2 className="w-10 h-10 text-success" />
-            )}
-            {phase.status === 'running' && (
-              <Loader2 className="w-10 h-10 text-primary animate-spin" />
-            )}
-            {phase.status === 'pending' && (
-              <Circle className="w-10 h-10 text-muted-foreground" />
-            )}
-          </div>
+    <div>
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="label-caps">Progress</span>
+        <span className="tabular text-xs text-muted">
+          {done}/{phases.length}
+        </span>
+      </div>
 
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-foreground capitalize">
-              {phase.name.replace('_', ' ')}
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              {phase.status === 'pending' && 'Waiting...'}
-              {phase.status === 'running' && 'In Progress'}
-              {phase.status === 'completed' && 'Completed ✓'}
-            </p>
-          </div>
+      <ol className="space-y-1">
+        {phases.map((phase, index) => {
+          const isLast = index === phases.length - 1
+          return (
+            <li key={phase.name} className="relative flex gap-3">
+              {/* Connector */}
+              {!isLast && (
+                <span
+                  aria-hidden="true"
+                  className={clsx(
+                    'absolute left-[0.6875rem] top-6 h-[calc(100%-0.5rem)] w-px',
+                    phase.status === 'completed' ? 'bg-severity-none/40' : 'bg-line',
+                  )}
+                />
+              )}
 
-          {phase.startTime && (
-            <Timer startTime={phase.startTime} isRunning={phase.status === 'running'} />
-          )}
-        </div>
-      ))}
+              <StepIcon status={phase.status} />
+
+              <div className="flex min-w-0 flex-1 items-baseline justify-between gap-2 pb-3">
+                <div className="min-w-0">
+                  <p
+                    className={clsx(
+                      'truncate text-sm',
+                      phase.status === 'pending'
+                        ? 'text-muted'
+                        : 'font-medium text-ink',
+                    )}
+                  >
+                    {PHASE_LABEL[phase.name]}
+                  </p>
+                  <p className="text-xs text-muted">{STATUS_TEXT[phase.status]}</p>
+                </div>
+
+                {phase.startTime && phase.status !== 'pending' && (
+                  <Elapsed
+                    startTime={phase.startTime}
+                    running={phase.status === 'running'}
+                  />
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }
 
-function Timer({ startTime, isRunning }: { startTime: Date; isRunning: boolean }) {
-  const [time, setTime] = React.useState(0)
+function StepIcon({ status }: { status: PhaseStatus['status'] }) {
+  if (status === 'completed') {
+    return (
+      <span className="relative z-10 flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full bg-severity-none/15 text-severity-none">
+        <Check className="h-3 w-3" aria-hidden="true" />
+      </span>
+    )
+  }
+  if (status === 'running') {
+    return (
+      <span className="relative z-10 flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full bg-accent-subtle text-accent">
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+      </span>
+    )
+  }
+  return (
+    <span
+      className="relative z-10 flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full border border-line bg-surface-2"
+      aria-hidden="true"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-ink-muted/50" />
+    </span>
+  )
+}
 
-  React.useEffect(() => {
-    if (!isRunning) return
+function Elapsed({ startTime, running }: { startTime: Date; running: boolean }) {
+  const [seconds, setSeconds] = useState(() =>
+    Math.floor((Date.now() - startTime.getTime()) / 1000),
+  )
 
-    const interval = setInterval(() => {
-      setTime(Math.floor((Date.now() - startTime.getTime()) / 1000))
-    }, 1000)
-
+  useEffect(() => {
+    if (!running) return
+    const tick = () =>
+      setSeconds(Math.floor((Date.now() - startTime.getTime()) / 1000))
+    tick()
+    const interval = setInterval(tick, 1000)
     return () => clearInterval(interval)
-  }, [isRunning, startTime])
+  }, [running, startTime])
 
-  const mins = Math.floor(time / 60)
-  const secs = time % 60
+  const mm = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, '0')
+  const ss = (seconds % 60).toString().padStart(2, '0')
 
   return (
-    <div className="text-sm font-mono text-primary font-semibold">
-      {mins.toString().padStart(2, '0')}:{secs.toString().padStart(2, '0')}
-    </div>
+    <span className="tabular shrink-0 font-mono text-xs text-muted">
+      {mm}:{ss}
+    </span>
   )
 }
-
-import React from 'react'

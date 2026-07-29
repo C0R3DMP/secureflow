@@ -25,11 +25,19 @@ export interface PhaseStatus {
 
 export interface Provider {
   name: 'claude' | 'gemini' | 'openrouter' | 'ollama' | 'opencode'
-  status: 'available' | 'limited' | 'unavailable'
+  /** 'unknown' until the first /api/providers response lands. */
+  status: 'available' | 'limited' | 'unavailable' | 'unknown'
   priority: number
   lastCheck?: Date
   mode?: 'cli' | 'api'
 }
+
+/** Ordered from most to least severe. */
+export type Severity = 'critical' | 'high' | 'medium' | 'low'
+
+export const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low']
+
+export type SeverityCounts = Record<Severity, number>
 
 export interface ScanSession {
   id: string
@@ -42,7 +50,14 @@ export interface ScanSession {
 }
 
 export interface StreamEvent {
-  event: 'start' | 'agent_message' | 'phase_complete' | 'report_ready' | 'complete' | 'error'
+  event:
+    | 'start'
+    | 'agent_message'
+    | 'phase_complete'
+    | 'findings'
+    | 'report_ready'
+    | 'complete'
+    | 'error'
   target?: string
   agent?: AgentRole
   phase?: string
@@ -52,4 +67,6 @@ export interface StreamEvent {
   message?: string
   timestamp?: string
   report?: string
+  /** Severity tally from the server, present on 'findings' events. */
+  counts?: Partial<SeverityCounts>
 }
