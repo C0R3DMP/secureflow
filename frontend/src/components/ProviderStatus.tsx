@@ -3,6 +3,7 @@ import { Badge } from './Badge'
 import type { Provider } from '../types'
 import clsx from 'clsx'
 import { useState } from 'react'
+import { authFetch } from '../lib/auth'
 
 const providerEmojis = {
   claude: '🤖',
@@ -31,7 +32,7 @@ export function ProviderStatus({ providers, onTest }: ProviderStatusProps) {
   const handleStartOpenCode = async () => {
     setStarting(true)
     try {
-      await fetch('/api/opencode/start', { method: 'POST' })
+      await authFetch('/api/opencode/start', { method: 'POST' })
       setTimeout(() => window.location.reload(), 1000)
     } catch {
       alert('Failed to start OpenCode server')
@@ -43,7 +44,7 @@ export function ProviderStatus({ providers, onTest }: ProviderStatusProps) {
   const handleStopOpenCode = async () => {
     setStopping(true)
     try {
-      await fetch('/api/opencode/stop', { method: 'POST' })
+      await authFetch('/api/opencode/stop', { method: 'POST' })
       setTimeout(() => window.location.reload(), 1000)
     } catch {
       alert('Failed to stop OpenCode server')

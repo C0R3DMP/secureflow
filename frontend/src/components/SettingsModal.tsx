@@ -1,5 +1,6 @@
 import { X, Check, Loader2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { authFetch } from '../lib/auth'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -38,7 +39,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const checkClaudeCli = async () => {
     setCheckingClaude(true)
     try {
-      const response = await fetch('/api/claude-cli-status')
+      const response = await authFetch('/api/claude-cli-status')
       const data = await response.json()
       setClaudeCliAvailable(data.available)
     } catch (e) {
@@ -73,7 +74,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
     // Send to backend
     try {
-      const response = await fetch('/api/settings', {
+      const response = await authFetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),

@@ -1,8 +1,18 @@
 """Tests for M9: report export (HTML, PDF, JSON)."""
 
+import importlib.util
 import json
 import tempfile
 from pathlib import Path
+
+import pytest
+
+# weasyprint ships in the optional 'export' extra, so PDF tests skip rather than
+# fail when only the base dependencies are installed.
+requires_weasyprint = pytest.mark.skipif(
+    importlib.util.find_spec("weasyprint") is None,
+    reason="PDF export needs the optional 'export' extra: pip install 'secureflow[export]'",
+)
 
 
 _MOCK_RESULT = {
@@ -59,6 +69,7 @@ def test_export_json_failed_scan():
         assert data["status"] == "error"
 
 
+@requires_weasyprint
 def test_export_pdf_creates_file():
     with tempfile.TemporaryDirectory() as tmp:
         path = _exporter(tmp).to_pdf(_MOCK_RESULT, "test.local")
@@ -79,6 +90,7 @@ def test_export_dispatch_json():
         assert path.endswith(".json")
 
 
+@requires_weasyprint
 def test_export_dispatch_pdf():
     with tempfile.TemporaryDirectory() as tmp:
         path = _exporter(tmp).export("pdf", _MOCK_RESULT, "test.local")

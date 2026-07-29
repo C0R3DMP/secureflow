@@ -7,6 +7,7 @@ import { ProviderStatus } from './ProviderStatus'
 import { SettingsModal } from './SettingsModal'
 import { ScanHistory } from './ScanHistory'
 import { useSSE } from '../hooks/useSSE'
+import { authFetch } from '../lib/auth'
 import type {
   AgentMessage,
   LogEntry,
@@ -181,7 +182,7 @@ export function Dashboard() {
 
   const loadHistory = async () => {
     try {
-      const response = await fetch('/api/history')
+      const response = await authFetch('/api/history')
       const data = await response.json()
       if (data.sessions) {
         setHistory(
@@ -208,7 +209,7 @@ export function Dashboard() {
     // Fetch provider status from API
     const fetchProviderStatus = async () => {
       try {
-        const response = await fetch('/api/providers')
+        const response = await authFetch('/api/providers')
         if (!response.ok) throw new Error('Failed to fetch provider status')
         const data = await response.json()
 

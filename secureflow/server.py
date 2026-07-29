@@ -5,6 +5,7 @@ import logging
 import os
 import socket
 import uuid
+from collections import OrderedDict
 from queue import Empty, Queue
 from typing import Any
 
@@ -12,13 +13,26 @@ from fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
+from secureflow import config
 from secureflow.config import MCP_SECRET
 from secureflow.crew.orchestrator import CrewOrchestrator
 from secureflow.crew.dev_orchestrator import DevOrchestrator
 from secureflow.crew.tasks import create_crew
+from secureflow.security import (
+    BearerAuthMiddleware,
+    InvalidTarget,
+    generate_token,
+    report_stem,
+    safe_join,
+    validate_target,
+)
 
-# Active scan registry: scan_id → {status, target, result}
-_active_scans: dict = {}
+__version__ = "0.1.0"
+
+# Active scan registry: scan_id → {status, target, result}. Bounded — an
+# unbounded dict grows for the lifetime of the process, one entry per scan.
+MAX_TRACKED_SCANS = 500
+_active_scans: "OrderedDict[str, dict]" = OrderedDict()
 
 # OpenCode process tracker for start/stop control
 _opencode_process: Any = None
@@ -29,33 +43,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-if not MCP_SECRET:
-    logger.warning("MCP_SECRET env var not set! Auth disabled (insecure).")
-
 app = FastMCP("secureflow-crew")
+
 
 class AuthError(Exception):
     """Raised when MCP authentication fails."""
     pass
 
-def check_auth(auth_header: str = None) -> bool:
-    """Validate bearer token authentication."""
-    if not MCP_SECRET:
-        return True
 
-    if not auth_header:
-        raise AuthError("Missing Authorization header")
+def _record_scan(scan_id: str, info: dict) -> None:
+    """Record scan state, evicting the oldest entries past MAX_TRACKED_SCANS."""
+    _active_scans[scan_id] = info
+    _active_scans.move_to_end(scan_id)
+    while len(_active_scans) > MAX_TRACKED_SCANS:
+        _active_scans.popitem(last=False)
 
-    if not auth_header.startswith("Bearer "):
-        raise AuthError("Invalid Authorization header format")
 
-    token = auth_header[7:]
-    expected_token = MCP_SECRET
-
-    if token != expected_token:
-        raise AuthError("Invalid bearer token")
-
-    return True
+def _invalid_target_result(target: Any, exc: Exception, **extra) -> dict:
+    """Uniform error payload for a rejected scan target."""
+    logger.warning(f"Rejected invalid target {target!r}: {exc}")
+    return {
+        "status": "error",
+        "target": str(target),
+        "error": str(exc),
+        "message": "Invalid target",
+        **extra,
+    }
 
 @app.tool()
 async def run_security_crew(target: str) -> dict:
@@ -74,7 +87,13 @@ async def run_security_crew(target: str) -> dict:
         dict with status, scan_id, findings, session log
     """
     scan_id = str(uuid.uuid4())
-    _active_scans[scan_id] = {"status": "running", "target": target}
+
+    try:
+        target = validate_target(target)
+    except InvalidTarget as exc:
+        return _invalid_target_result(target, exc, scan_id=scan_id)
+
+    _record_scan(scan_id, {"status": "running", "target": target})
     logger.info(f"🚀 Starting security crew for target: {target} (scan_id={scan_id})")
 
     try:
@@ -82,7 +101,7 @@ async def run_security_crew(target: str) -> dict:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, orchestrator.run_security_crew, target)
 
-        _active_scans[scan_id] = {"status": "complete", "target": target}
+        _record_scan(scan_id, {"status": "complete", "target": target})
         return {
             "status": "success" if result.get("success") else "error",
             "scan_id": scan_id,
@@ -94,7 +113,7 @@ async def run_security_crew(target: str) -> dict:
 
     except Exception as e:
         logger.error(f"Security crew failed: {str(e)}", exc_info=True)
-        _active_scans[scan_id] = {"status": "error", "target": target, "error": str(e)}
+        _record_scan(scan_id, {"status": "error", "target": target, "error": str(e)})
         return {
             "status": "error",
             "scan_id": scan_id,
@@ -115,6 +134,11 @@ async def run_recon(target: str) -> dict:
     Returns:
         dict with recon findings
     """
+    try:
+        target = validate_target(target)
+    except InvalidTarget as exc:
+        return _invalid_target_result(target, exc)
+
     try:
         logger.info(f"📡 Starting fast recon for target: {target}")
 
@@ -151,7 +175,7 @@ def crew_status() -> dict:
     """
     return {
         "status": "healthy",
-        "version": "1.0.0",
+        "version": __version__,
         "capabilities": [
             "security_crew",
             "security_crew_stream",
@@ -183,6 +207,11 @@ async def run_security_crew_stream(target: str, ctx: Context) -> dict:
     Returns:
         dict with status, target, result
     """
+    try:
+        target = validate_target(target)
+    except InvalidTarget as exc:
+        return _invalid_target_result(target, exc)
+
     event_queue: Queue = Queue()
     phase_idx = [0]
 
@@ -233,22 +262,22 @@ async def stream_scan_sse(request: Request) -> StreamingResponse:
 
     Events format: data: {"event": "<name>", ...}\\n\\n
     """
-    from secureflow.crew.orchestrator import get_message_queue, clear_message_queue
+    from starlette.responses import JSONResponse
 
-    target = request.path_params["target"]
+    raw_target = request.path_params["target"]
+    try:
+        target = validate_target(raw_target)
+    except InvalidTarget as exc:
+        logger.warning(f"Rejected invalid stream target {raw_target!r}: {exc}")
+        return JSONResponse(status_code=400, content={"error": "invalid target", "detail": str(exc)})
 
-    # Get the global message queue from orchestrator
-    msg_queue = get_message_queue()
-    clear_message_queue()
+    # Each scan owns its queue — a single process-wide queue let concurrent
+    # scans consume each other's events.
+    orchestrator = CrewOrchestrator()
+    msg_queue = orchestrator.message_queue
 
     loop = asyncio.get_running_loop()
-
-    # Run crew in executor (blocking operation in thread pool)
-    def _run_crew():
-        orchestrator = CrewOrchestrator()
-        return orchestrator.run_security_crew(target)
-
-    future = loop.run_in_executor(None, _run_crew)
+    future = loop.run_in_executor(None, orchestrator.run_security_crew, target)
 
     async def _generate():
         yield f"data: {json.dumps({'event': 'start', 'target': target})}\n\n"
@@ -377,7 +406,7 @@ async def run_code_review(code: str, language: str) -> dict:
 @app.custom_route("/ui", methods=["GET"])
 async def serve_dashboard_root(request: Request):
     """Serve React dashboard root."""
-    from starlette.responses import FileResponse
+    from starlette.responses import FileResponse, PlainTextResponse
     from pathlib import Path
 
     # Serve built React app
@@ -390,15 +419,14 @@ async def serve_dashboard_root(request: Request):
     if fallback_path.exists():
         return FileResponse(str(fallback_path), media_type="text/html")
 
-    return FileResponse(
-        status_code=404,
-        content=b"Dashboard not found"
-    )
+    # FileResponse takes a path, not a body — the old FileResponse(status_code=,
+    # content=) call raised TypeError (HTTP 500) instead of returning a 404.
+    return PlainTextResponse("Dashboard not found. Run ./setup-frontend.sh to build it.", status_code=404)
 
 @app.custom_route("/ui/", methods=["GET"])
 async def serve_dashboard_root_slash(request: Request):
     """Serve React dashboard root with trailing slash."""
-    from starlette.responses import FileResponse
+    from starlette.responses import FileResponse, PlainTextResponse
     from pathlib import Path
 
     react_path = Path(__file__).parent / "static" / "dist" / "index.html"
@@ -409,28 +437,35 @@ async def serve_dashboard_root_slash(request: Request):
     if fallback_path.exists():
         return FileResponse(str(fallback_path), media_type="text/html")
 
-    return FileResponse(status_code=404, content=b"Dashboard not found")
+    return PlainTextResponse("Dashboard not found. Run ./setup-frontend.sh to build it.", status_code=404)
 
 @app.custom_route("/ui/{path_remaining:path}", methods=["GET"])
 async def serve_dashboard_assets(request: Request):
     """Serve React app assets and handle client-side routing."""
-    from starlette.responses import FileResponse
+    from starlette.responses import FileResponse, PlainTextResponse
     from pathlib import Path
 
     path = request.path_params.get("path_remaining", "")
+    dist_root = Path(__file__).parent / "static" / "dist"
 
-    # Try to serve the exact file
+    # Try to serve the exact file. safe_join rejects any path that escapes the
+    # dist directory — joining the raw param allowed '..%2f' traversal and
+    # served arbitrary files off the host filesystem.
     if path:
-        asset_path = Path(__file__).parent / "static" / "dist" / path
+        asset_path = safe_join(dist_root, path)
+        if asset_path is None:
+            logger.warning(f"Blocked path traversal attempt: /ui/{path!r}")
+            from starlette.responses import PlainTextResponse
+            return PlainTextResponse("Not found", status_code=404)
         if asset_path.exists() and asset_path.is_file():
             return FileResponse(str(asset_path))
 
     # For client-side routing, serve index.html
-    index_path = Path(__file__).parent / "static" / "dist" / "index.html"
+    index_path = dist_root / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path), media_type="text/html")
 
-    return FileResponse(status_code=404, content=b"Not found")
+    return PlainTextResponse("Not found", status_code=404)
 
 @app.custom_route("/api/reports/export", methods=["GET"])
 async def export_report(request: Request):
@@ -453,14 +488,25 @@ async def export_report(request: Request):
     if fmt not in ("html", "pdf", "json"):
         return JSONResponse(status_code=400, content={"error": "format must be html, pdf, or json"})
 
-    # Locate existing HTML report produced by orchestrator
-    from pathlib import Path as _Path
-    default_log_dir = _Path.home() / ".secureflow"
-    stem = target.replace("/", "_").replace(":", "_").replace(" ", "_")
-    html_path = default_log_dir / f"report_{stem}.html"
+    try:
+        target = validate_target(target)
+    except InvalidTarget as exc:
+        return JSONResponse(status_code=400, content={"error": "invalid target", "detail": str(exc)})
+
+    # Locate existing HTML report produced by orchestrator. Both sides derive the
+    # filename from security.report_stem; hand-rolling the sanitisation here made
+    # export miss any report whose target contained ':' or a space.
+    default_log_dir = Path.home() / ".secureflow"
+    html_path = default_log_dir / f"report_{report_stem(target)}.html"
+
+    if not html_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "no report found for target", "target": target},
+        )
 
     # Build a minimal result dict so ReportExporter can work
-    report_html = html_path.read_text(encoding="utf-8") if html_path.exists() else ""
+    report_html = html_path.read_text(encoding="utf-8")
     result = {
         "success": bool(report_html),
         "result": report_html,
@@ -688,21 +734,28 @@ async def start_opencode_server(request: Request):
 @app.custom_route("/api/opencode/stop", methods=["POST"])
 async def stop_opencode_server(request: Request):
     """Stop the OpenCode server."""
+    import subprocess
+
     from starlette.responses import JSONResponse
     global _opencode_process
 
     if _opencode_process is None:
-        # Try to find and kill any opencode process on port 4096
-        try:
-            import subprocess
-            subprocess.run(["pkill", "-f", "opencode.*4096"], check=False)
-            return JSONResponse({"status": "stopped", "message": "Killed opencode processes on port 4096"})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        # Only processes this server started are ours to stop. The previous
+        # `pkill -f "opencode.*4096"` matched on any user's command line and
+        # could kill unrelated processes.
+        return JSONResponse({
+            "status": "not_running",
+            "message": "No OpenCode process was started by this server",
+        })
 
     try:
         _opencode_process.terminate()
-        _opencode_process.wait(timeout=5)
+        try:
+            _opencode_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning("OpenCode did not exit in 5s — sending SIGKILL")
+            _opencode_process.kill()
+            _opencode_process.wait(timeout=5)
         _opencode_process = None
         return JSONResponse({"status": "stopped"})
     except Exception as e:
@@ -718,62 +771,73 @@ async def save_settings(request: Request):
 
     try:
         body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"status": "error", "message": "body must be a JSON object"})
 
-        # Extract settings
-        claude_key = body.get("claudeKey", "")
-        claude_mode = body.get("claudeMode", "api")
-        gemini_key = body.get("geminiKey", "")
-        gemini_model = body.get("geminiModel", "gemini-2.5-flash")
-        openrouter_key = body.get("openrouterKey", "")
-        openrouter_model = body.get("openrouterModel", "")
-        ollama_url = body.get("ollamaUrl", "http://localhost:11434")
+        # Map request fields → env var names. Only keys actually present in the
+        # request are touched: the previous version rebuilt the whole file from
+        # defaults, so saving one provider silently erased the others' keys.
+        field_map = {
+            "claudeKey": "ANTHROPIC_API_KEY",
+            "claudeMode": "CLAUDE_MODE",
+            "geminiKey": "GEMINI_API_KEY",
+            "geminiModel": "GEMINI_MODEL",
+            "openrouterKey": "OPENROUTER_API_KEY",
+            "openrouterModel": "OPENROUTER_MODEL",
+            "ollamaUrl": "OLLAMA_BASE_URL",
+        }
 
-        # Update environment
-        import os
-        if claude_key:
-            os.environ["ANTHROPIC_API_KEY"] = claude_key
-        os.environ["CLAUDE_MODE"] = claude_mode
-        if gemini_key:
-            os.environ["GEMINI_API_KEY"] = gemini_key
-        os.environ["GEMINI_MODEL"] = gemini_model
-        if openrouter_key:
-            os.environ["OPENROUTER_API_KEY"] = openrouter_key
-        if openrouter_model:
-            os.environ["OPENROUTER_MODEL"] = openrouter_model
-        if ollama_url:
-            os.environ["OLLAMA_BASE_URL"] = ollama_url
+        updates = {}
+        for field, env_var in field_map.items():
+            if field not in body:
+                continue
+            value = body[field]
+            if value is None:
+                continue
+            value = str(value).strip()
+            # Reject newlines: they would let one field inject extra .env lines.
+            if "\n" in value or "\r" in value:
+                return JSONResponse(
+                    status_code=400,
+                    content={"status": "error", "message": f"{field} must not contain newlines"},
+                )
+            updates[env_var] = value
 
-        # Try to update .env file
+        if not updates:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "no known settings supplied"})
+
         env_path = Path.home() / ".secureflow" / ".env"
         env_path.parent.mkdir(parents=True, exist_ok=True)
 
-        env_content = ""
-        if claude_key:
-            env_content += f"ANTHROPIC_API_KEY={claude_key}\n"
-        env_content += f"CLAUDE_MODE={claude_mode}\n"
-        if gemini_key:
-            env_content += f"GEMINI_API_KEY={gemini_key}\n"
-        env_content += f"GEMINI_MODEL={gemini_model}\n"
-        if openrouter_key:
-            env_content += f"OPENROUTER_API_KEY={openrouter_key}\n"
-        if openrouter_model:
-            env_content += f"OPENROUTER_MODEL={openrouter_model}\n"
-        if ollama_url:
-            env_content += f"OLLAMA_BASE_URL={ollama_url}\n"
+        # Merge with whatever is already on disk rather than overwriting.
+        existing: dict = {}
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                existing[key.strip()] = val.strip()
+        existing.update(updates)
 
-        with open(env_path, "w") as f:
-            f.write(env_content)
+        env_path.write_text(
+            "".join(f"{k}={v}\n" for k, v in sorted(existing.items())),
+            encoding="utf-8",
+        )
+        # API keys live in this file — keep it owner-only.
+        os.chmod(env_path, 0o600)
 
-        logger.info(f"Settings saved to {env_path}")
+        # Apply in-process. Writing os.environ alone was a no-op: config's
+        # module-level constants were captured at import and never re-read.
+        os.environ.update(updates)
+        config.reload_settings()
+
+        logger.info(f"Settings saved to {env_path}: {sorted(updates)}")
 
         return JSONResponse({
             "status": "success",
             "message": "Settings saved successfully",
-            "settings": {
-                "claude_mode": claude_mode,
-                "gemini_model": gemini_model,
-                "ollama_url": ollama_url
-            }
+            "updated": sorted(updates.keys()),
         })
 
     except Exception as e:
@@ -783,19 +847,64 @@ async def save_settings(request: Request):
             content={"status": "error", "message": str(e)}
         )
 
+def resolve_auth_secret() -> str:
+    """Determine the bearer secret the server will enforce.
+
+    A penetration-testing server that runs unauthenticated is a remote scanning
+    proxy for anyone who can reach the port, so "no secret configured" must not
+    mean "no auth". If MCP_SECRET is unset we mint an ephemeral one and print it,
+    unless the operator explicitly opts out with SECUREFLOW_ALLOW_ANONYMOUS=1.
+    """
+    secret = os.getenv("MCP_SECRET", "") or MCP_SECRET
+    if secret:
+        return secret
+
+    if os.getenv("SECUREFLOW_ALLOW_ANONYMOUS", "").lower() in ("1", "true", "yes"):
+        logger.warning(
+            "SECUREFLOW_ALLOW_ANONYMOUS is set — the API is UNAUTHENTICATED. "
+            "Anyone who can reach this port can launch scans against arbitrary targets."
+        )
+        return ""
+
+    secret = generate_token()
+    os.environ["MCP_SECRET"] = secret
+    config.reload_settings()
+    logger.warning("MCP_SECRET was not set — generated an ephemeral token for this run:")
+    logger.warning("    MCP_SECRET=%s", secret)
+    logger.warning("    Use it as: Authorization: Bearer %s   (or ?token=... for SSE)", secret)
+    logger.warning("    Set MCP_SECRET in your .env to keep a stable token across restarts.")
+    return secret
+
+
 def main():
-    """Run the FastMCP server on 0.0.0.0:5000 with SSE transport."""
+    """Run the FastMCP server with SSE transport."""
     import asyncio
     import subprocess
     from secureflow.config import OPENCODE_SERVER_PASSWORD
     global _opencode_process
 
+    secret = resolve_auth_secret()
+
+    # Default to loopback. Binding 0.0.0.0 exposes the scanning API to the whole
+    # network; opt in explicitly via SECUREFLOW_HOST when that is intended.
+    host = os.getenv("SECUREFLOW_HOST", "127.0.0.1")
+    try:
+        port = int(os.getenv("SECUREFLOW_PORT", "5000"))
+    except ValueError:
+        logger.warning("Invalid SECUREFLOW_PORT, falling back to 5000")
+        port = 5000
+
     logger.info("Starting CrewAI Security MCP Server...")
-    logger.info(f"Auth enabled: {bool(MCP_SECRET)}")
+    logger.info(f"Auth enabled: {bool(secret)}")
     logger.info("Transport: SSE")
-    logger.info("Host: 0.0.0.0")
-    logger.info("Port: 5000")
-    logger.info("Dashboard: http://localhost:5000/ui")
+    logger.info(f"Host: {host}")
+    logger.info(f"Port: {port}")
+    logger.info(f"Dashboard: http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}/ui")
+    if host == "0.0.0.0" and not secret:
+        logger.error(
+            "Refusing configuration guidance: bound to all interfaces with auth disabled. "
+            "Set MCP_SECRET before exposing this server."
+        )
 
     # Auto-start OpenCode if available and not already running
     if _is_port_open(OPENCODE_URL or "http://127.0.0.1:4096"):
@@ -815,12 +924,20 @@ def main():
         except Exception as e:
             logger.warning(f"Failed to start OpenCode: {e}")
 
+    from starlette.middleware import Middleware
+
+    # Auth is enforced here, as ASGI middleware in front of every route —
+    # including the MCP transport endpoints. The previous check_auth() helper
+    # was never called from anywhere, so MCP_SECRET had no effect at all.
+    middleware = [Middleware(BearerAuthMiddleware, secret=secret)] if secret else []
+
     asyncio.run(
         app.run_http_async(
-            host="0.0.0.0",
-            port=5000,
+            host=host,
+            port=port,
             transport="sse",
-            log_level="info"
+            log_level="info",
+            middleware=middleware,
         )
     )
 

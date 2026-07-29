@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { StreamEvent } from '../types'
+import { withToken } from '../lib/auth'
 
 export function useSSE(
   target: string | null,
@@ -9,7 +10,11 @@ export function useSSE(
   useEffect(() => {
     if (!target) return
 
-    const eventSource = new EventSource(`/stream/${encodeURIComponent(target)}`)
+    // EventSource cannot set an Authorization header, so the bearer token
+    // travels as a query parameter on this route only.
+    const eventSource = new EventSource(
+      withToken(`/stream/${encodeURIComponent(target)}`),
+    )
 
     const handleMessage = (event: MessageEvent) => {
       try {

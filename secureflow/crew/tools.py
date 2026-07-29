@@ -7,6 +7,8 @@ from typing import Dict, List, Any
 import re
 from crewai.tools import tool
 
+from secureflow.security import InvalidTarget, validate_target
+
 # Common ports for socket fallback scanner
 _COMMON_PORTS = [
     21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143,
@@ -27,21 +29,35 @@ _SERVICE_NAMES = {
 class SecurityTools:
     """Security scanning and lookup tools for the crew."""
 
+    # Minimum seconds between outbound NVD API calls (public tier is 5 req/30s).
+    NVD_MIN_INTERVAL = 3.0
+
     def __init__(self):
         self.cve_cache = {}
-        self.last_api_call = 0
+        self.last_api_call = 0.0
 
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
         Scan target for open ports and services.
         Primary: nmap -Pn -sV --top-ports=50
         Fallback: socket-based scanner if nmap unavailable or times out.
+
+        The target is validated first: an unvalidated value beginning with '-'
+        is parsed by nmap as an option, not a host, which turns this into an
+        argument-injection sink (e.g. '--script=/tmp/evil.nse').
         """
+        try:
+            target = validate_target(target)
+        except InvalidTarget as exc:
+            return {"status": "error", "scanner": "none", "target": target, "message": str(exc)}
+
         try:
             cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
                 cmd.append("-v")
-            cmd.append(target)
+            # '--' terminates option parsing so the target can never be read
+            # as a flag, even if validation is ever loosened.
+            cmd.extend(["--", target])
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60
@@ -72,6 +88,11 @@ class SecurityTools:
     def _socket_scan(self, target: str, timeout: float = 1.0) -> Dict[str, Any]:
         """Lightweight socket-based port scanner — no external dependencies."""
         open_ports = []
+        try:
+            target = validate_target(target)
+        except InvalidTarget as exc:
+            return {"status": "error", "scanner": "socket", "message": str(exc)}
+
         try:
             host = socket.gethostbyname(target)
         except socket.gaierror as e:
@@ -123,13 +144,19 @@ class SecurityTools:
     def lookup_cve(self, product: str, version: str = "") -> Dict[str, Any]:
         """
         Look up CVEs for a product/version via NVD API.
-        Includes rate limiting (3s between requests).
+        Rate limited to one request per NVD_MIN_INTERVAL seconds.
         """
         cache_key = f"{product}:{version}"
         if cache_key in self.cve_cache:
             return self.cve_cache[cache_key]
 
-        time.sleep(3)
+        # Sleep only for the time still owed since the last call, rather than a
+        # flat 3s on every lookup. `last_api_call` was previously recorded but
+        # never read, so the throttle always paid full price.
+        elapsed = time.time() - self.last_api_call
+        remaining = self.NVD_MIN_INTERVAL - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
         self.last_api_call = time.time()
 
         try:

@@ -122,18 +122,20 @@ def scan(target, fmt):
 
     try:
         from secureflow.crew.orchestrator import CrewOrchestrator
-        from secureflow.crew.history import SessionHistory
         from secureflow.reports import ReportExporter
+        from secureflow.security import InvalidTarget, validate_target
+
+        try:
+            target = validate_target(target)
+        except InvalidTarget as exc:
+            click.secho(f"\n❌ Invalid target: {exc}", fg="red", bold=True)
+            return 1
 
         orchestrator = CrewOrchestrator()
         result = orchestrator.run_security_crew(target)
 
-        SessionHistory().record(
-            session_type="security",
-            target=target,
-            status="success" if result.get("success") else "failed",
-            summary=result.get("error", "")[:200],
-        )
+        # NOTE: the orchestrator already writes this session to SessionHistory.
+        # Recording it again here produced two rows per CLI scan.
 
         if result.get("success"):
             exporter = ReportExporter()

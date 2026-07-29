@@ -4,8 +4,8 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 114/114](https://img.shields.io/badge/tests-114%2F114%20passing-brightgreen)](#testing)
-[![Status: Production](https://img.shields.io/badge/status-production--ready-success)](https://github.com/secureflow/secureflow)
+[![Tests: 187 passing](https://img.shields.io/badge/tests-187%20passing-brightgreen)](#testing)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/secureflow/secureflow)
 
 SecureFlow is a complete AI-powered security assessment and application development platform. Multi-agent teams (Recon, Analyst, Reporter) collaborate via shared context to execute comprehensive penetration tests. Supports Claude, Gemini, and Ollama LLMs.
 
@@ -28,7 +28,7 @@ SecureFlow is a complete AI-powered security assessment and application developm
 - CLI interface with full command support
 - Report export (HTML, PDF, JSON)
 - Webhook notifications & scheduled scans
-- 114 automated tests, comprehensive coverage
+- 187 automated tests, comprehensive coverage
 
 ## Quick Start
 
@@ -84,6 +84,55 @@ SecureFlow tries providers in this order (first available is used):
 4. **Claude API** — Requires `ANTHROPIC_API_KEY`
 
 **Recommendation:** Use OpenRouter for free models with no rate limits on free tier
+
+## Security
+
+SecureFlow launches network scans on demand, so an exposed instance is a remote
+scanning proxy for whoever can reach it. The server is built to fail closed.
+
+### Authentication
+
+Every `/api/*`, `/stream/*` and MCP transport route requires a bearer token. Only
+the static dashboard under `/ui` is public (it is inert without API access).
+
+```bash
+# Recommended: set a stable token
+MCP_SECRET=$(openssl rand -hex 32)
+```
+
+If `MCP_SECRET` is unset, the server **generates an ephemeral token at startup and
+prints it** rather than running unauthenticated. To deliberately run with no auth
+(local development only), set `SECUREFLOW_ALLOW_ANONYMOUS=1`.
+
+Pass the token as a header, or — for the SSE stream, since `EventSource` cannot
+set headers — as a query parameter:
+
+```bash
+curl -H "Authorization: Bearer $MCP_SECRET" http://localhost:5000/api/history
+curl -N "http://localhost:5000/stream/example.com?token=$MCP_SECRET"
+```
+
+The dashboard reads the token from `?token=...` on first load and remembers it in
+`localStorage`.
+
+### Network exposure
+
+The server binds `127.0.0.1:5000` by default. Override deliberately:
+
+```bash
+SECUREFLOW_HOST=0.0.0.0 SECUREFLOW_PORT=5000 secureflow server
+```
+
+### Target validation
+
+Scan targets must be a hostname, IPv4/IPv6 address, CIDR network, or URL. Values
+that begin with `-` or contain shell/argv metacharacters are rejected before
+reaching `nmap`, closing an argument-injection path (`--script=…`, `-oN …`).
+
+### Scope
+
+Only scan systems you are authorised to test. Automated scanning of third-party
+infrastructure without permission is illegal in most jurisdictions.
 
 ## CLI Commands
 
