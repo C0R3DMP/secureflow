@@ -49,6 +49,74 @@ def _cpe_for(product: str, version: str) -> str:
     return f"cpe:2.3:a:{vendor}:{name}:{ver}"
 
 
+def _osv_lookup(product: str, version: str, timeout: int = 10) -> List[Dict[str, Any]]:
+    """Query OSV.dev for a package version.
+
+    NVD's CPE matching depends on getting vendor:product exactly right, and a
+    miss returns silently empty. OSV matches on package coordinates instead and
+    has better coverage and freshness for open-source components, so the two are
+    used together rather than either alone.
+    """
+    if not version:
+        return []
+
+    try:
+        response = requests.post(
+            "https://api.osv.dev/v1/query",
+            json={"package": {"name": product}, "version": version},
+            timeout=timeout,
+        )
+        if response.status_code != 200:
+            return []
+        vulns = response.json().get("vulns", []) or []
+    except (requests.exceptions.RequestException, ValueError):
+        return []
+
+    findings = []
+    for vuln in vulns:
+        # Prefer the aliased CVE id so results dedupe against the NVD set.
+        aliases = vuln.get("aliases") or []
+        identifier = next((a for a in aliases if a.startswith("CVE-")), vuln.get("id", ""))
+        severity = _osv_severity(vuln)
+        findings.append({
+            "id": identifier,
+            "description": (vuln.get("summary") or vuln.get("details") or "")[:400],
+            "score": severity[1],
+            "severity": severity[0],
+            "cvss_version": "osv",
+            "source": "osv",
+        })
+    return findings
+
+
+def _osv_severity(vuln: Dict[str, Any]) -> Any:
+    """Derive (label, score) from an OSV record's severity block."""
+    for entry in vuln.get("severity", []) or []:
+        score = entry.get("score", "")
+        # OSV commonly carries a CVSS vector string rather than a number.
+        if isinstance(score, str) and score.startswith("CVSS:"):
+            continue
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            continue
+        return (_label_for_score(value), value)
+
+    severity = (vuln.get("database_specific") or {}).get("severity")
+    label = _normalise_severity(severity)
+    return (label or "unknown", 0)
+
+
+def _label_for_score(score: float) -> str:
+    if score >= 9.0:
+        return "critical"
+    if score >= 7.0:
+        return "high"
+    if score >= 4.0:
+        return "medium"
+    return "low"
+
+
 _SEVERITY_LEVELS = ("critical", "high", "medium", "low")
 
 
@@ -292,14 +360,28 @@ class SecurityTools:
                 continue  # try the next strategy before giving up
 
             cves = [_parse_cve(v) for v in vulns]
-
-            # Each CVE carries a real CVSS baseSeverity — record it so the
-            # dashboard can summarise measured findings.
             for cve in cves:
+                cve.setdefault("source", "nvd")
+
+            # Complement NVD with OSV. A CPE miss returns silently empty, so a
+            # single source makes "no findings" indistinguishable from "no match".
+            merged = {cve["id"]: cve for cve in cves if cve.get("id")}
+            osv_added = 0
+            for finding in _osv_lookup(product, version):
+                key = finding.get("id")
+                if key and key not in merged:
+                    merged[key] = finding
+                    osv_added += 1
+
+            combined = list(merged.values())
+
+            # Each finding carries a real severity — record it so the dashboard
+            # can summarise measured results.
+            for finding in combined:
                 self.record_finding(
-                    severity=cve.get("severity", ""),
+                    severity=finding.get("severity", ""),
                     source=f"{product} {version}".strip(),
-                    reference=cve.get("id", ""),
+                    reference=finding.get("id", ""),
                 )
 
             result = {
@@ -307,9 +389,10 @@ class SecurityTools:
                 "product": product,
                 "version": version,
                 "match_strategy": strategy,
-                "cve_count": len(vulns),
+                "sources": ["nvd"] + (["osv"] if osv_added else []),
+                "cve_count": len(combined),
                 "total_available": data.get("totalResults", len(vulns)),
-                "cves": cves,
+                "cves": combined,
             }
             self.cve_cache[cache_key] = result
             return result

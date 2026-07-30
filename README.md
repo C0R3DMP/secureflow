@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 221 passing](https://img.shields.io/badge/tests-221%20passing-brightgreen)](#testing)
+[![Tests: 253 passing](https://img.shields.io/badge/tests-253%20passing-brightgreen)](#testing)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/secureflow/secureflow)
 
 SecureFlow is a complete AI-powered security assessment and application development platform. Multi-agent teams (Recon, Analyst, Reporter) collaborate via shared context to execute comprehensive penetration tests. Supports Claude, Gemini, and Ollama LLMs.
@@ -28,7 +28,13 @@ SecureFlow is a complete AI-powered security assessment and application developm
 - CLI interface with full command support
 - Report export (HTML, PDF, JSON)
 - Webhook notifications & scheduled scans
-- 221 automated tests, comprehensive coverage
+- 253 automated tests, comprehensive coverage
+
+### 💬 Ask AI
+- Chat directly with the configured LLM about an assessment, in the dashboard
+- Answers are grounded in that scan's stored findings and CVSS severity tally
+- Streams token by token over SSE, with a stop control
+- Runs on the same provider chain as the crew (Gemini → OpenRouter → Ollama → Claude)
 
 ### 🖥️ Dashboard
 - Live agent activity, event log with level filters, and phase progress
@@ -166,6 +172,7 @@ infrastructure without permission is illegal in most jurisdictions.
 | POST | `/tools/run_code_review` | Code review analysis (async) |
 | GET | `/api/scans/{scan_id}` | Poll scan status |
 | GET | `/api/history` | Scan history (JSON) |
+| POST | `/api/chat` | Chat with the LLM about a scan (SSE token stream) |
 | GET | `/api/reports/export?target=X&format=html` | Export report (html/pdf/json) |
 | GET | `/ui` | Web dashboard |
 | GET | `/stream/{target}` | SSE progress stream |
@@ -179,7 +186,7 @@ infrastructure without permission is illegal in most jurisdictions.
 │  • nmap scan (top 1000 ports)                           │
 │  • Service version detection                            │
 │  • CVE lookup per service                               │
-│  └─→ Save to SharedContext: recon_scan_results          │
+│  └─→ Save to SharedContext: scan_results          │
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
