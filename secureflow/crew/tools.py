@@ -209,11 +209,23 @@ class SecurityTools:
         with self._findings_lock:
             self._findings.clear()
 
+    # nmap must wait out a connection timeout on every filtered (non-responding)
+    # port before it can conclude "filtered" rather than "open"/"closed". Live-
+    # verified against scanme.nmap.org — a real, benign, well-known target —
+    # `-sV --top-ports=50` took 107s because 48 of those 50 ports were filtered.
+    # The previous 60s timeout silently discarded every real nmap run against
+    # any target with a real firewall in front of it, falling back to the
+    # socket scanner with no signal that a downgrade had even happened.
+    NMAP_TIMEOUT_SECONDS = 180
+
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
         Scan target for open ports and services.
         Primary: nmap -Pn -sV --top-ports=50
-        Fallback: socket-based scanner if nmap unavailable or times out.
+        Fallback: socket-based scanner if nmap is unavailable, times out, or
+        otherwise fails. The fallback result always names the reason so a
+        report can distinguish "no nmap installed" from "nmap timed out" from
+        a genuine scan — the two failure paths were previously indistinguishable.
 
         The target is validated first: an unvalidated value beginning with '-'
         is parsed by nmap as an option, not a host, which turns this into an
@@ -224,6 +236,7 @@ class SecurityTools:
         except InvalidTarget as exc:
             return {"status": "error", "scanner": "none", "target": target, "message": str(exc)}
 
+        fallback_reason = "nmap unavailable"
         try:
             cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
@@ -233,7 +246,7 @@ class SecurityTools:
             cmd.extend(["--", target])
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60
+                cmd, capture_output=True, text=True, timeout=self.NMAP_TIMEOUT_SECONDS
             )
 
             if result.returncode == 0 or (result.stdout and "Nmap scan report" in result.stdout):
@@ -246,19 +259,25 @@ class SecurityTools:
                 }
 
             # nmap ran but returned an error — fall through to socket scan
-            raise RuntimeError(result.stderr or "nmap returned non-zero")
+            fallback_reason = f"nmap returned an error: {result.stderr or 'non-zero exit'}"
+            raise RuntimeError(fallback_reason)
 
         except FileNotFoundError:
-            pass  # nmap not installed → socket fallback
+            fallback_reason = "nmap is not installed"
         except subprocess.TimeoutExpired:
-            pass  # nmap timed out → socket fallback
-        except Exception:
-            pass  # any other nmap error → socket fallback
+            fallback_reason = (
+                f"nmap did not finish within {self.NMAP_TIMEOUT_SECONDS}s "
+                "(a real scan of a filtered target can legitimately take this long)"
+            )
+        except RuntimeError:
+            pass  # fallback_reason already set above
+        except Exception as exc:
+            fallback_reason = f"nmap failed unexpectedly: {exc}"
 
-        # Socket-based fallback
-        return self._socket_scan(target)
+        # Socket-based fallback — always honest about *why* it was used.
+        return self._socket_scan(target, fallback_reason=fallback_reason)
 
-    def _socket_scan(self, target: str, timeout: float = 1.0) -> Dict[str, Any]:
+    def _socket_scan(self, target: str, timeout: float = 1.0, fallback_reason: str = "nmap unavailable") -> Dict[str, Any]:
         """Lightweight socket-based port scanner — no external dependencies."""
         open_ports = []
         try:
@@ -294,7 +313,7 @@ class SecurityTools:
             "target": target,
             "output": "\n".join(output_lines),
             "open_ports": open_ports,
-            "note": "nmap unavailable — used socket scanner (no version detection)",
+            "note": f"{fallback_reason} — used socket scanner (no version detection)",
         }
 
     def parse_nmap_output(self, nmap_output: str) -> List[Dict[str, str]]:
@@ -331,8 +350,18 @@ class SecurityTools:
         # CRITICAL findings for a target almost certainly not running either.
         # Refuse the query rather than let a meaningless keyword match dress
         # itself up as a confirmed finding.
+        # nmap denotes an SSL/TLS-wrapped service as "tunnel/protocol" (its own
+        # documented convention — e.g. "ssl/http", "ssl/imap"), which the
+        # exact-match check above missed. Verified live against a real nmap
+        # scan of scanme.nmap.org: nmap -sV reported "ssl/http", which is not
+        # literally "http", and lookup_cve("ssl/http", "") fell through to the
+        # same unbounded keyword search this whole check exists to prevent.
         normalised_product = str(product or "").strip().lower()
-        if not version and normalised_product in _GENERIC_SERVICE_LABELS:
+        base_label = normalised_product.rsplit("/", 1)[-1]
+        if not version and (
+            normalised_product in _GENERIC_SERVICE_LABELS
+            or base_label in _GENERIC_SERVICE_LABELS
+        ):
             return {
                 "status": "insufficient_data",
                 "product": product,

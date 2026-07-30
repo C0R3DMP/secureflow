@@ -672,3 +672,17 @@ def test_generate_recommendations_flags_unknown_risk_services():
     recs = tools.generate_recommendations([{"risk_level": "unknown"}])
 
     assert any("UNKNOWN" in r and "nmap" in r for r in recs)
+
+
+def test_lookup_cve_catches_nmap_ssl_tunnel_notation():
+    """nmap denotes an SSL/TLS-wrapped service as 'tunnel/protocol' (e.g.
+    'ssl/http'), its own documented convention. Live-verified against a real
+    nmap -sV scan of scanme.nmap.org: it reported exactly 'ssl/http', which
+    the exact-match generic-label check missed, and the query fell through to
+    the unbounded keyword search this whole guard exists to prevent."""
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    for label in ("ssl/http", "ssl/https", "ssl/imap", "tls/ftp"):
+        result = tools.lookup_cve(label, "")
+        assert result["status"] == "insufficient_data", label
