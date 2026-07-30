@@ -259,15 +259,43 @@ class SecurityTools:
             return None
         return max(votes.items(), key=lambda kv: kv[1])[0]
 
-    def record_finding(self, severity: str, source: str, reference: str = "") -> None:
-        """Record one severity-rated finding for the current scan."""
+    def record_finding(
+        self,
+        severity: str,
+        source: str,
+        reference: str = "",
+        confidence: str = "likely",
+        description: str = "",
+    ) -> None:
+        """Record one severity-rated finding for the current scan.
+
+        `confidence` is a distinct axis from severity: severity is how bad the
+        finding would be if real, confidence is how sure we are it actually
+        applies to this target. A passive CPE version match is "likely", a
+        looser keyword match is "possible", and `mark_confirmed()` upgrades a
+        specific CVE to "confirmed" once an active Nuclei probe observes it —
+        the same verified/unverified distinction the project's own research
+        roadmap called for extending past a single "unknown" risk level.
+        """
         level = _normalise_severity(severity)
         if level is None:
             return
         with self._findings_lock:
-            self._findings.append(
-                {"severity": level, "source": source, "reference": reference}
-            )
+            self._findings.append({
+                "severity": level,
+                "source": source,
+                "reference": reference,
+                "confidence": confidence,
+                "description": description,
+            })
+
+    def mark_confirmed(self, cve_id: str) -> None:
+        """Upgrade a previously recorded finding to "confirmed" once an active
+        probe (verify_with_nuclei) has actually observed it on the target."""
+        with self._findings_lock:
+            for finding in self._findings:
+                if finding["reference"] == cve_id:
+                    finding["confidence"] = "confirmed"
 
     def severity_counts(self) -> Dict[str, int]:
         """Deduplicated counts by severity, keyed on the finding reference."""
@@ -281,6 +309,20 @@ class SecurityTools:
                 seen.add(key)
                 counts[finding["severity"]] += 1
         return counts
+
+    def get_findings(self) -> List[Dict[str, Any]]:
+        """Deduplicated structured findings for the current scan, newest first
+        duplicate discarded — the same dedup key as severity_counts()."""
+        seen = set()
+        out: List[Dict[str, Any]] = []
+        with self._findings_lock:
+            for finding in self._findings:
+                key = finding["reference"] or f"{finding['source']}:{finding['severity']}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(dict(finding))
+        return out
 
     def clear_findings(self) -> None:
         with self._findings_lock:
@@ -515,12 +557,19 @@ class SecurityTools:
             combined = list(merged.values())
 
             # Each finding carries a real severity — record it so the dashboard
-            # can summarise measured results.
+            # can summarise measured results. Confidence tracks the match
+            # strategy: an exact CPE version match is "likely", the looser
+            # keyword fallback (no exact CPE hit, or no version to match on)
+            # is only "possible" — collapsing the two into one confidence
+            # would overstate how sure a keyword-only hit actually is.
+            match_confidence = "likely" if strategy == "cpe" else "possible"
             for finding in combined:
                 self.record_finding(
                     severity=finding.get("severity", ""),
                     source=f"{product} {version}".strip(),
                     reference=finding.get("id", ""),
+                    confidence=match_confidence,
+                    description=finding.get("description", "")[:300],
                 )
 
             result = {
@@ -558,7 +607,8 @@ class SecurityTools:
         # let a missing nmap scan quietly read as a clean bill of health.
         if status == "success":
             risk_level = "low"
-            if cve_data.get("cve_count", 0) > 0:
+            cve_count = cve_data.get("cve_count", 0)
+            if cve_count > 0:
                 avg_score = sum([c.get("score", 0) for c in cve_data.get("cves", [])]) / max(1, len(cve_data.get("cves", [])))
                 if avg_score >= 9:
                     risk_level = "critical"
@@ -566,14 +616,24 @@ class SecurityTools:
                     risk_level = "high"
                 elif avg_score >= 4:
                     risk_level = "medium"
+                # A real CPE version match is a solid basis for a CVE finding;
+                # the keyword fallback is a much looser text search and
+                # shouldn't be reported with the same confidence.
+                confidence = "likely" if cve_data.get("match_strategy") == "cpe" else "possible"
+            else:
+                # A real, specific check ran and found nothing — that's a
+                # confident "clean", not the same as never having checked.
+                confidence = "high"
         else:
             risk_level = "unknown"
+            confidence = "insufficient_data" if status == "insufficient_data" else "unknown"
 
         return {
             "port": port,
             "service": service,
             "version": version,
             "risk_level": risk_level,
+            "confidence": confidence,
             "cve_data": cve_data
         }
 
@@ -696,6 +756,9 @@ class SecurityTools:
                 continue
 
         if findings:
+            # Upgrade the passive finding this CVE came from (if any) to
+            # "confirmed" — real observed behaviour outranks a version match.
+            self.mark_confirmed(cve_id)
             return {
                 "status": "confirmed",
                 "cve_id": cve_id,

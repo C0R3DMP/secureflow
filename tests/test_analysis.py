@@ -492,6 +492,72 @@ def test_clear_findings_resets_between_scans():
     assert sum(tools.severity_counts().values()) == 0
 
 
+def test_record_finding_defaults_to_likely_confidence():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    tools.record_finding("high", "openssh", "CVE-1")
+
+    [finding] = tools.get_findings()
+    assert finding["confidence"] == "likely"
+
+
+def test_get_findings_returns_structured_deduplicated_list():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    tools.record_finding("critical", "openssh", "CVE-1", confidence="possible", description="d")
+    tools.record_finding("critical", "openssh", "CVE-1", confidence="possible", description="d")  # dup
+
+    findings = tools.get_findings()
+    assert len(findings) == 1
+    assert findings[0] == {
+        "severity": "critical",
+        "source": "openssh",
+        "reference": "CVE-1",
+        "confidence": "possible",
+        "description": "d",
+    }
+
+
+def test_mark_confirmed_upgrades_matching_finding_only():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    tools.record_finding("high", "openssh", "CVE-1", confidence="likely")
+    tools.record_finding("high", "apache", "CVE-2", confidence="likely")
+    tools.mark_confirmed("CVE-1")
+
+    by_ref = {f["reference"]: f["confidence"] for f in tools.get_findings()}
+    assert by_ref["CVE-1"] == "confirmed"
+    assert by_ref["CVE-2"] == "likely"
+
+
+def test_verify_with_nuclei_confirmed_upgrades_confidence(monkeypatch):
+    """A real active-probe match must upgrade the passive finding it confirms,
+    not just report success in isolation — that's the whole point of tracking
+    confidence as a field the rest of the tool can act on."""
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: "/usr/local/bin/nuclei")
+
+    finding_line = json.dumps({"template-id": "CVE-2021-41773", "matched-at": "http://x/"})
+
+    class _Match:
+        returncode = 0
+        stdout = finding_line + "\n"
+        stderr = ""
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", lambda *a, **k: _Match())
+
+    tools = tools_mod.SecurityTools()
+    tools.record_finding("critical", "apache 2.4", "CVE-2021-41773", confidence="likely")
+    tools.verify_with_nuclei("example.com", "CVE-2021-41773")
+
+    [finding] = tools.get_findings()
+    assert finding["confidence"] == "confirmed"
+
+
 def test_cve_lookup_records_real_cvss_severities(monkeypatch):
     """Counts come from NVD baseSeverity, not from keywords in agent prose."""
     import secureflow.crew.tools as tools_mod
@@ -543,6 +609,41 @@ def test_cve_lookup_records_real_cvss_severities(monkeypatch):
     assert counts["critical"] == 1
     assert counts["medium"] == 1
     assert counts["high"] == 0
+
+
+def test_cve_lookup_records_possible_confidence_for_keyword_only_match(monkeypatch):
+    """No version to build a CPE from means the keyword fallback is the only
+    strategy tried — that's a much looser match than an exact CPE hit, and
+    must be recorded as "possible", not "likely"."""
+    import secureflow.crew.tools as tools_mod
+
+    payload = {
+        "totalResults": 1,
+        "vulnerabilities": [{
+            "cve": {
+                "id": "CVE-KEYWORD",
+                "descriptions": [{"lang": "en", "value": "d"}],
+                "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 5.0, "baseSeverity": "MEDIUM"}}]},
+            }
+        }],
+    }
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return payload
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    tools.lookup_cve("some-obscure-product")  # no version -> keyword strategy only
+
+    [finding] = tools.get_findings()
+    assert finding["confidence"] == "possible"
 
 
 def test_orchestrator_emits_findings_event(tmp_path, monkeypatch):
@@ -765,6 +866,7 @@ def test_assess_vulnerability_reports_unknown_not_low_when_data_is_insufficient(
     result = tools.assess_vulnerability("80/tcp", "http", "")
 
     assert result["risk_level"] == "unknown"
+    assert result["confidence"] == "insufficient_data"
     assert result["cve_data"]["status"] == "insufficient_data"
 
 
@@ -788,7 +890,29 @@ def test_assess_vulnerability_still_reports_low_for_a_real_clean_result(monkeypa
     result = tools.assess_vulnerability("22/tcp", "openssh", "99.9-fake-clean-version")
 
     assert result["risk_level"] == "low"
+    assert result["confidence"] == "high"  # a real check ran and found nothing
     assert result["cve_data"]["status"] == "success"
+
+
+def test_assess_vulnerability_reports_unknown_confidence_on_lookup_error(monkeypatch):
+    """A failed lookup (network error, non-200) is a different kind of unknown
+    than never having enough data to check — both map to risk 'unknown', but
+    confidence must say which one happened rather than collapsing them."""
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(
+        tools_mod.requests, "get",
+        lambda *a, **k: (_ for _ in ()).throw(tools_mod.requests.exceptions.ConnectionError("boom")),
+    )
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    result = tools.assess_vulnerability("22/tcp", "openssh", "8.0")
+
+    assert result["risk_level"] == "unknown"
+    assert result["confidence"] == "unknown"
+    assert result["cve_data"]["status"] == "error"
 
 
 def test_generate_recommendations_flags_unknown_risk_services():
