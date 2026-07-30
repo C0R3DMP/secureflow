@@ -197,14 +197,15 @@ def test_suggestions_empty_for_clean_code():
 # CVE lookup query construction
 # ---------------------------------------------------------------------------
 
-def test_cpe_uses_known_vendor_prefix():
-    """NVD CPEs are vendor-qualified; a bare product name matches nothing."""
-    assert _cpe_for("openssh", "8.0") == "cpe:2.3:a:openbsd:openssh:8.0"
-    assert _cpe_for("nginx", "1.18.0") == "cpe:2.3:a:nginx:nginx:1.18.0"
+def test_cpe_for_is_pure_string_formatting():
+    """_cpe_for no longer resolves a vendor itself — that's _resolve_cpe_vendor's
+    job now (queried dynamically against NVD). This is just formatting."""
+    assert _cpe_for("openbsd", "openssh", "8.0") == "cpe:2.3:a:openbsd:openssh:8.0"
+    assert _cpe_for("igor_sysoev", "nginx", "1.18.0") == "cpe:2.3:a:igor_sysoev:nginx:1.18.0"
 
 
 def test_cpe_sanitises_hostile_input():
-    cpe = _cpe_for("evil; rm -rf /", "1.0")
+    cpe = _cpe_for("evil; rm -rf /", "product", "1.0")
     assert ";" not in cpe and " " not in cpe
 
 
@@ -227,13 +228,136 @@ def test_versioned_lookup_uses_cpe_not_keyword(monkeypatch):
 
     monkeypatch.setattr(tools_mod.requests, "get", _fake_get)
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+    # Isolate this test to CVE-search construction — vendor resolution has its
+    # own dedicated tests below. Also stub OSV: it calls requests.post, which
+    # this test never mocked, so it was silently making a real network call.
+    monkeypatch.setattr(tools_mod.SecurityTools, "_resolve_cpe_vendor", lambda self, p: "openbsd")
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
 
     tools_mod.SecurityTools().lookup_cve("openssh", "8.0")
 
-    assert "virtualMatchString" in seen[0]
-    assert seen[0]["virtualMatchString"] == "cpe:2.3:a:openbsd:openssh:8.0"
+    cpe_calls = [p for p in seen if "virtualMatchString" in p]
+    assert cpe_calls, f"no CPE-strategy call was made: {seen}"
+    assert cpe_calls[0]["virtualMatchString"] == "cpe:2.3:a:openbsd:openssh:8.0"
     # And it must not send the old all-tokens-must-match keyword query.
     assert all(p.get("keywordSearch") != "openssh 8.0" for p in seen)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic CPE vendor resolution against NVD's own dictionary
+#
+# The previous static table was never checked against real data and was
+# simply wrong for several common products — verified directly:
+#   mysql -> "oracle" (real: "mysql"), nginx -> "nginx" (real: "igor_sysoev"),
+#   vsftpd -> "vsftpd" (real: "vsftpd_project"), redis had no entry at all and
+#   a naive first-keyword-hit resolves to an unrelated "att" product.
+# ---------------------------------------------------------------------------
+
+def _cpe_dict_response(entries):
+    """Build a fake NVD CPE dictionary response from (vendor, product) pairs."""
+    return {
+        "products": [
+            {"cpe": {"cpeName": f"cpe:2.3:a:{vendor}:{product}:1.0:*:*:*:*:*:*:*"}}
+            for vendor, product in entries
+        ]
+    }
+
+
+def test_resolve_cpe_vendor_majority_votes_exact_product_matches(monkeypatch):
+    """A naive 'trust the first hit' approach is unreliable — keywordSearch is
+    full-text and its top result can be an unrelated product. Filtering to
+    exact product-field matches and taking the majority vendor is what
+    actually resolves correctly (verified against real NVD data: redis ->
+    pivotal_software, 18/20 exact matches agreeing)."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return _cpe_dict_response(
+                [("pivotal_software", "redis")] * 4
+                + [("att", "redis-something-else")] * 3  # different product field
+            )
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    assert tools._resolve_cpe_vendor("redis") == "pivotal_software"
+
+
+def test_resolve_cpe_vendor_falls_back_to_static_table_when_nvd_unreachable(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    def _boom(*a, **k):
+        raise tools_mod.requests.exceptions.ConnectionError("offline")
+
+    monkeypatch.setattr(tools_mod.requests, "get", _boom)
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    assert tools._resolve_cpe_vendor("openssh") == "openbsd"
+
+
+def test_resolve_cpe_vendor_falls_back_to_product_name_when_totally_unknown(monkeypatch):
+    """No network, and not in the static table either — must not crash."""
+    import secureflow.crew.tools as tools_mod
+
+    def _boom(*a, **k):
+        raise tools_mod.requests.exceptions.ConnectionError("offline")
+
+    monkeypatch.setattr(tools_mod.requests, "get", _boom)
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    assert tools._resolve_cpe_vendor("some_totally_unknown_product") == "some_totally_unknown_product"
+
+
+def test_resolve_cpe_vendor_caches_and_does_not_requery(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    calls = []
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return _cpe_dict_response([("mysql", "mysql")])
+
+    def _fake_get(*a, **k):
+        calls.append(1)
+        return _Resp()
+
+    monkeypatch.setattr(tools_mod.requests, "get", _fake_get)
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    assert tools._resolve_cpe_vendor("mysql") == "mysql"
+    assert tools._resolve_cpe_vendor("mysql") == "mysql"
+    assert len(calls) == 1, "second call must be served from cache, not re-queried"
+
+
+def test_resolve_cpe_vendor_ignores_no_exact_product_match(monkeypatch):
+    """If nothing in the dictionary response has a matching product field,
+    that's not a resolution — fall back rather than trust an unrelated hit."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return _cpe_dict_response([("adobe", "totally_different_product")])
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    # "php" is in the static fallback table and correct there.
+    assert tools._resolve_cpe_vendor("php") == "php"
 
 
 def test_parse_cve_falls_back_through_cvss_versions():

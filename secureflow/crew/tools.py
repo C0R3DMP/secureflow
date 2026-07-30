@@ -28,25 +28,34 @@ _SERVICE_NAMES = {
 }
 
 
-# Vendor prefixes for the products we most often fingerprint. NVD CPEs are
-# vendor-qualified, so a bare product name will not match.
+# Offline fallback only — used when the live NVD CPE dictionary lookup below
+# is unreachable. Verified against NVD's own dictionary directly: several
+# previous guesses here were simply wrong (mysql -> "oracle" when NVD uses
+# "mysql"; nginx -> "nginx" when NVD uses "igor_sysoev"; vsftpd -> "vsftpd"
+# when NVD uses "vsftpd_project"; redis had no entry and a naive first-hit
+# keyword search resolves to an unrelated "att" product). Corrected from
+# direct verification, not guessed.
 _CPE_VENDORS = {
     "openssh": "openbsd", "ssh": "openbsd",
     "apache": "apache", "httpd": "apache", "tomcat": "apache",
-    "nginx": "nginx", "mysql": "oracle", "mariadb": "mariadb",
-    "postgresql": "postgresql", "redis": "redis", "mongodb": "mongodb",
-    "vsftpd": "vsftpd", "proftpd": "proftpd", "samba": "samba",
+    "nginx": "igor_sysoev", "mysql": "mysql", "mariadb": "mariadb",
+    "postgresql": "postgresql", "redis": "pivotal_software", "mongodb": "mongodb",
+    "vsftpd": "vsftpd_project", "proftpd": "proftpd", "samba": "samba",
     "openssl": "openssl", "bind": "isc", "dovecot": "dovecot",
     "postfix": "postfix", "exim": "exim", "php": "php",
 }
 
 
-def _cpe_for(product: str, version: str) -> str:
+def _normalise_cpe_component(value: str) -> str:
+    return re.sub(r"[^a-z0-9_.-]", "_", str(value).strip().lower())
+
+
+def _cpe_for(vendor: str, product: str, version: str) -> str:
     """Build a CPE 2.3 match string for an NVD virtualMatchString query."""
-    name = re.sub(r"[^a-z0-9_.-]", "_", str(product).strip().lower())
-    ver = re.sub(r"[^a-z0-9_.-]", "_", str(version).strip().lower())
-    vendor = _CPE_VENDORS.get(name, name)
-    return f"cpe:2.3:a:{vendor}:{name}:{ver}"
+    return (
+        f"cpe:2.3:a:{_normalise_cpe_component(vendor)}:"
+        f"{_normalise_cpe_component(product)}:{_normalise_cpe_component(version)}"
+    )
 
 
 def _osv_lookup(product: str, version: str, timeout: int = 10) -> List[Dict[str, Any]]:
@@ -176,11 +185,78 @@ class SecurityTools:
     def __init__(self):
         self.cve_cache = {}
         self.last_api_call = 0.0
+        self._cpe_vendor_cache: Dict[str, str] = {}
         # Structured findings recorded during a scan. These come from real CVSS
         # data returned by NVD — the dashboard summarises these rather than
         # counting severity words in the agents' prose.
         self._findings: List[Dict[str, Any]] = []
         self._findings_lock = threading.Lock()
+
+    def _throttle_nvd(self) -> None:
+        """Shared rate limit across every NVD endpoint this class calls —
+        the public tier is 5 req/30s regardless of which NVD path is hit."""
+        elapsed = time.time() - self.last_api_call
+        remaining = self.NVD_MIN_INTERVAL - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self.last_api_call = time.time()
+
+    def _resolve_cpe_vendor(self, product: str) -> str:
+        """Resolve a product name to its NVD CPE vendor tag dynamically.
+
+        The ~15-entry hardcoded table this replaced was flatly wrong for
+        several common products (verified directly against NVD's own CPE
+        dictionary: mysql, nginx, vsftpd, redis) because it was never checked
+        against real data. Querying the dictionary itself is authoritative and
+        covers products the table never anticipated; the static table now only
+        serves as an offline fallback when NVD is unreachable.
+
+        A naive "trust the first keyword hit" approach is unreliable —
+        keywordSearch is full-text and its top hit can be an unrelated product
+        (verified: "php" surfaced an Adobe product first, "redis" an AT&T
+        one). Filtering to results whose CPE *product* field exactly equals
+        the query, then taking the most common vendor among those, is what
+        actually resolves correctly.
+        """
+        normalised = _normalise_cpe_component(product)
+        if normalised in self._cpe_vendor_cache:
+            return self._cpe_vendor_cache[normalised]
+
+        vendor = self._query_nvd_cpe_dictionary(normalised)
+        if vendor is None:
+            vendor = _CPE_VENDORS.get(normalised, normalised)
+
+        self._cpe_vendor_cache[normalised] = vendor
+        return vendor
+
+    def _query_nvd_cpe_dictionary(self, normalised_product: str) -> Any:
+        """Return the majority-vote vendor for an exact CPE product match, or
+        None if the dictionary is unreachable or has no exact match."""
+        self._throttle_nvd()
+        try:
+            response = requests.get(
+                "https://services.nvd.nist.gov/rest/json/cpes/2.0",
+                params={"keywordSearch": normalised_product, "resultsPerPage": 20},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                return None
+            data = response.json()
+        except (requests.exceptions.RequestException, ValueError):
+            return None
+
+        votes: Dict[str, int] = {}
+        for item in data.get("products", []):
+            cpe_name = (item.get("cpe") or {}).get("cpeName", "")
+            parts = cpe_name.split(":")
+            # cpe:2.3:a:<vendor>:<product>:... — index 4 is the product field.
+            if len(parts) > 4 and parts[4] == normalised_product:
+                vendor = parts[3]
+                votes[vendor] = votes.get(vendor, 0) + 1
+
+        if not votes:
+            return None
+        return max(votes.items(), key=lambda kv: kv[1])[0]
 
     def record_finding(self, severity: str, source: str, reference: str = "") -> None:
         """Record one severity-rated finding for the current scan."""
@@ -382,28 +458,26 @@ class SecurityTools:
         if cache_key in self.cve_cache:
             return self.cve_cache[cache_key]
 
-        # Sleep only for the time still owed since the last call, rather than a
-        # flat 3s on every lookup. `last_api_call` was previously recorded but
-        # never read, so the throttle always paid full price.
-        elapsed = time.time() - self.last_api_call
-        remaining = self.NVD_MIN_INTERVAL - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
-        self.last_api_call = time.time()
-
         # NVD's keywordSearch requires *every* token to appear in the CVE text.
         # "openssh 8.0" therefore matched nothing, so any versioned lookup
         # silently returned zero CVEs and every service was rated "low".
         # Query by CPE when a version is known, and fall back to a keyword
-        # search on the product alone.
+        # search on the product alone. The vendor is resolved dynamically
+        # against NVD's own CPE dictionary (throttled + cached) rather than
+        # guessed from a small static table.
         attempts = []
         if version:
-            attempts.append(("cpe", {"virtualMatchString": _cpe_for(product, version)}))
+            vendor = self._resolve_cpe_vendor(product)
+            attempts.append(("cpe", {"virtualMatchString": _cpe_for(vendor, product, version)}))
         attempts.append(("keyword", {"keywordSearch": product}))
 
         last_error = None
         for strategy, extra in attempts:
             params = {"resultsPerPage": 10, **extra}
+            # Throttle immediately before each real call — this loop can make
+            # two (cpe then keyword), and _resolve_cpe_vendor above may have
+            # made a third; NVD's public rate limit applies across all of them.
+            self._throttle_nvd()
             try:
                 response = requests.get(
                     "https://services.nvd.nist.gov/rest/json/cves/2.0",

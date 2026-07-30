@@ -178,8 +178,17 @@ def test_fallback_chain_uses_valid_anthropic_prefix(monkeypatch):
 # NVD throttle
 # ---------------------------------------------------------------------------
 
-def test_cve_lookup_does_not_sleep_when_interval_elapsed(monkeypatch):
-    """The old code slept a flat 3s per lookup and never read last_api_call."""
+def test_throttle_nvd_does_not_sleep_when_interval_elapsed(monkeypatch):
+    """The old code slept a flat 3s per lookup and never read last_api_call.
+
+    Tested directly against the extracted _throttle_nvd() helper rather than
+    through lookup_cve(): a single lookup_cve() call can legitimately make
+    more than one real NVD request now (vendor resolution, a cpe attempt, a
+    keyword fallback), each correctly throttled against the last *actual*
+    call — so asserting on lookup_cve()'s exact internal call count would
+    make this test brittle to call-sequence changes that aren't the bug it
+    exists to catch.
+    """
     import time
 
     import secureflow.crew.tools as tools_mod
@@ -187,21 +196,17 @@ def test_cve_lookup_does_not_sleep_when_interval_elapsed(monkeypatch):
     slept = []
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: slept.append(s))
 
-    class _Resp:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {"vulnerabilities": []}
-
-    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
-
     tools = tools_mod.SecurityTools()
-    # Pretend the last call was long ago — no wait should be owed.
-    tools.last_api_call = time.time() - 3600
-    tools.lookup_cve("openssh", "8.0")
 
-    assert all(s <= 0 for s in slept) or not slept
+    # Long ago -> no wait owed.
+    tools.last_api_call = time.time() - 3600
+    tools._throttle_nvd()
+    assert not slept, "must not sleep when the interval has already elapsed"
+
+    # Just now -> the full interval is correctly owed.
+    tools.last_api_call = time.time()
+    tools._throttle_nvd()
+    assert slept and 0 < slept[0] <= tools.NVD_MIN_INTERVAL
 
 
 def test_cve_lookup_uses_cache_without_network(monkeypatch):
