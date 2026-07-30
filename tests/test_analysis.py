@@ -549,3 +549,126 @@ def test_severity_label_thresholds():
     assert _label_for_score(7.4) == "high"
     assert _label_for_score(5.3) == "medium"
     assert _label_for_score(2.1) == "low"
+
+
+# ---------------------------------------------------------------------------
+# CVE lookup must refuse a meaningless bare-protocol-name query
+#
+# Live-verified: nmap isn't installed in this environment, so the socket-scan
+# fallback only ever returns a generic label like "http"/"https" with no
+# version. lookup_cve("http", "") fell through to NVD's keywordSearch on that
+# single common word, matching 10 of 17,631 CVEs that happen to mention "http"
+# somewhere in 25 years of NVD history — arbitrary, not findings for the
+# actual target. A real end-to-end crew run against scanme.nmap.org (using a
+# genuine Gemini key) wrote these into the report as CRITICAL/HIGH findings
+# for 1999-2001-era products (a defunct antivirus proxy, an abandoned web
+# server) almost certainly not running on that host.
+# ---------------------------------------------------------------------------
+
+def test_lookup_cve_refuses_bare_protocol_label_without_version():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    result = tools.lookup_cve("http", "")
+
+    assert result["status"] == "insufficient_data"
+    assert result["cve_count"] == 0
+    assert result["cves"] == []
+    assert "nmap" in result["message"]
+
+
+def test_lookup_cve_refuses_every_generic_service_label(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("must not reach the network for a bare protocol label")
+
+    monkeypatch.setattr(tools_mod.requests, "get", _boom)
+    monkeypatch.setattr(tools_mod.requests, "post", _boom)
+
+    tools = tools_mod.SecurityTools()
+    for label in ("ssh", "https", "ftp", "telnet", "smtp", "rdp", "vnc"):
+        result = tools.lookup_cve(label, "")
+        assert result["status"] == "insufficient_data", label
+
+
+def test_lookup_cve_with_real_product_and_version_is_unaffected(monkeypatch):
+    """The refusal must be specific to bare labels, not swallow real lookups."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulnerabilities": [], "totalResults": 0}
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    result = tools_mod.SecurityTools().lookup_cve("openssh", "8.0")
+    assert result["status"] == "success"
+
+
+def test_lookup_cve_with_version_for_generic_label_is_unaffected(monkeypatch):
+    """A version turns a generic label into a real query — e.g. 'http' isn't
+    usually versioned, but 'ssh 8.0' or similar should still be attempted."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulnerabilities": [], "totalResults": 0}
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    result = tools_mod.SecurityTools().lookup_cve("ssh", "8.0")
+    assert result["status"] == "success"
+
+
+def test_assess_vulnerability_reports_unknown_not_low_when_data_is_insufficient():
+    """Missing data must read as 'we don't know', never as a clean bill of health."""
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    result = tools.assess_vulnerability("80/tcp", "http", "")
+
+    assert result["risk_level"] == "unknown"
+    assert result["cve_data"]["status"] == "insufficient_data"
+
+
+def test_assess_vulnerability_still_reports_low_for_a_real_clean_result(monkeypatch):
+    """A genuinely-checked product/version with zero CVEs is real signal — must
+    stay 'low', not be swept into the new 'unknown' bucket."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulnerabilities": [], "totalResults": 0}
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    result = tools.assess_vulnerability("22/tcp", "openssh", "99.9-fake-clean-version")
+
+    assert result["risk_level"] == "low"
+    assert result["cve_data"]["status"] == "success"
+
+
+def test_generate_recommendations_flags_unknown_risk_services():
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    recs = tools.generate_recommendations([{"risk_level": "unknown"}])
+
+    assert any("UNKNOWN" in r and "nmap" in r for r in recs)

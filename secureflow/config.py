@@ -443,40 +443,50 @@ def get_best_available_llm(temperature=0.7):
     available = LLMProviderStatus.get_available_providers()
     logger.info(f"Available LLM providers: {[p[0] for p in available]}")
 
+    # Each branch is wrapped so a provider that *reports* itself available but
+    # fails to actually construct (e.g. a missing optional SDK dependency —
+    # reproduced live: Gemini's own native client import raised ImportError
+    # here despite a valid key) doesn't take the whole function down with it.
+    # Every other configured provider, and the final Ollama fallback below,
+    # should still get a chance.
     for provider, priority in available:
         logger.info(f"Trying provider: {provider} (priority: {priority})")
 
-        if provider == "gemini":
-            if GEMINI_API_KEY:
-                logger.info(f"✅ Using Gemini API (primary, 5 req/min)")
-                return get_llm_with_rate_limit_fallback(
-                    model="gemini/gemini-2.5-flash",
-                    temperature=temperature
-                )
-        elif provider == "openrouter":
-            if OPENROUTER_API_KEY:
-                logger.info(f"✅ Using OpenRouter (free models)")
+        try:
+            if provider == "gemini":
+                if GEMINI_API_KEY:
+                    logger.info(f"✅ Using Gemini API (primary, 5 req/min)")
+                    return get_llm_with_rate_limit_fallback(
+                        model="gemini/gemini-2.5-flash",
+                        temperature=temperature
+                    )
+            elif provider == "openrouter":
+                if OPENROUTER_API_KEY:
+                    logger.info(f"✅ Using OpenRouter (free models)")
+                    return LLM(
+                        model="openrouter/google/gemini-2.0-flash-exp:free",
+                        api_key=OPENROUTER_API_KEY,
+                        base_url="https://openrouter.ai/api/v1",
+                        temperature=temperature,
+                    )
+            elif provider == "ollama":
+                logger.info(f"✅ Using Ollama (local, free)")
                 return LLM(
-                    model="openrouter/google/gemini-2.0-flash-exp:free",
-                    api_key=OPENROUTER_API_KEY,
-                    base_url="https://openrouter.ai/api/v1",
+                    model="ollama/qwen2.5-coder:7b",
+                    base_url=OLLAMA_BASE_URL,
                     temperature=temperature,
                 )
-        elif provider == "ollama":
-            logger.info(f"✅ Using Ollama (local, free)")
-            return LLM(
-                model="ollama/qwen2.5-coder:7b",
-                base_url=OLLAMA_BASE_URL,
-                temperature=temperature,
-            )
-        elif provider == "claude":
-            if ANTHROPIC_API_KEY:
-                logger.info(f"✅ Using Claude API")
-                return LLM(
-                    model="claude-opus-4-6",
-                    api_key=ANTHROPIC_API_KEY,
-                    temperature=temperature,
-                )
+            elif provider == "claude":
+                if ANTHROPIC_API_KEY:
+                    logger.info(f"✅ Using Claude API")
+                    return LLM(
+                        model="claude-opus-4-6",
+                        api_key=ANTHROPIC_API_KEY,
+                        temperature=temperature,
+                    )
+        except Exception as e:
+            logger.warning(f"Provider {provider} reported available but failed to initialize: {e}")
+            continue
 
     # Fallback: always try Ollama if nothing else works
     try:
