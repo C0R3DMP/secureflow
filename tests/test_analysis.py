@@ -611,13 +611,13 @@ def test_cve_lookup_records_real_cvss_severities(monkeypatch):
     assert counts["high"] == 0
 
 
-def test_cve_lookup_records_possible_confidence_for_keyword_only_match(monkeypatch):
-    """No version to build a CPE from means the keyword fallback is the only
-    strategy tried — that's a much looser match than an exact CPE hit, and
-    must be recorded as "possible", not "likely"."""
+def test_cve_lookup_records_possible_confidence_when_cpe_misses_and_keyword_hits(monkeypatch):
+    """A version IS known, but the CPE match found nothing and the keyword
+    fallback did — that's a much looser match than an exact CPE hit, and must
+    be recorded as "possible", not "likely"."""
     import secureflow.crew.tools as tools_mod
 
-    payload = {
+    keyword_payload = {
         "totalResults": 1,
         "vulnerabilities": [{
             "cve": {
@@ -628,22 +628,56 @@ def test_cve_lookup_records_possible_confidence_for_keyword_only_match(monkeypat
         }],
     }
 
+    calls = {"n": 0}
+
     class _Resp:
-        status_code = 200
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
 
-        @staticmethod
-        def json():
-            return payload
+        def json(self):
+            return self._payload
 
-    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    def _fake_get(*a, **k):
+        calls["n"] += 1
+        # First call is the CPE attempt (misses); second is the keyword fallback.
+        if calls["n"] == 1:
+            return _Resp({"vulnerabilities": [], "totalResults": 0})
+        return _Resp(keyword_payload)
+
+    monkeypatch.setattr(tools_mod.requests, "get", _fake_get)
     monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(tools_mod.SecurityTools, "_resolve_cpe_vendor", lambda self, p: "vendor")
 
     tools = tools_mod.SecurityTools()
-    tools.lookup_cve("some-obscure-product")  # no version -> keyword strategy only
+    result = tools.lookup_cve("some-obscure-product", "1.0")
 
+    assert result["match_strategy"] == "keyword"
     [finding] = tools.get_findings()
     assert finding["confidence"] == "possible"
+
+
+def test_cve_lookup_refuses_any_unversioned_lookup_even_for_a_specific_sounding_product(monkeypatch):
+    """Live-verified this week: the recon agent guessed the product name
+    'Apache HTTP Server' for a service nmap could only fingerprint as
+    'ssl/http', and cve_lookup('Apache HTTP Server', '') matched 10 of 471
+    CVEs spanning that product's entire history — none tied to the actual
+    target. A specific-sounding invented name defeats any check keyed on
+    known-generic strings; only refusing every unversioned lookup holds."""
+    import secureflow.crew.tools as tools_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("must not query NVD/OSV without a version")
+
+    monkeypatch.setattr(tools_mod.requests, "get", _boom)
+    monkeypatch.setattr(tools_mod.requests, "post", _boom)
+
+    tools = tools_mod.SecurityTools()
+    result = tools.lookup_cve("Apache HTTP Server", "")
+
+    assert result["status"] == "insufficient_data"
+    assert result["cve_count"] == 0
 
 
 def test_orchestrator_emits_findings_event(tmp_path, monkeypatch):

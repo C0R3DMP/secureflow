@@ -127,11 +127,6 @@ def _label_for_score(score: float) -> str:
     return "low"
 
 
-# Bare protocol/port labels our own socket-scan fallback assigns when nmap
-# isn't available and no banner/version could be read. Reused from
-# _SERVICE_NAMES so the set can't silently drift from what the scanner emits.
-_GENERIC_SERVICE_LABELS = set(_SERVICE_NAMES.values())
-
 _SEVERITY_LEVELS = ("critical", "high", "medium", "low")
 
 
@@ -457,30 +452,24 @@ class SecurityTools:
         Look up CVEs for a product/version via NVD API.
         Rate limited to one request per NVD_MIN_INTERVAL seconds.
         """
-        # A bare protocol/service label ("http", "ssh", ...) with no version is
-        # not enough to identify anything running. Verified live: nmap isn't
-        # installed here, so the socket-scan fallback only ever returns a
-        # generic label like this, and lookup_cve("http", "") fell through to
-        # NVD's keyword search on that single common word — a match against
-        # any of 17,631 CVEs that happen to mention "http" anywhere in 25 years
-        # of NVD history, with no relationship to the actual target. The
-        # reporter agent then wrote 1999-2001-era CVEs (a defunct antivirus
-        # product's HTTP proxy, an abandoned web server) into the report as
-        # CRITICAL findings for a target almost certainly not running either.
-        # Refuse the query rather than let a meaningless keyword match dress
-        # itself up as a confirmed finding.
-        # nmap denotes an SSL/TLS-wrapped service as "tunnel/protocol" (its own
-        # documented convention — e.g. "ssl/http", "ssl/imap"), which the
-        # exact-match check above missed. Verified live against a real nmap
-        # scan of scanme.nmap.org: nmap -sV reported "ssl/http", which is not
-        # literally "http", and lookup_cve("ssl/http", "") fell through to the
-        # same unbounded keyword search this whole check exists to prevent.
-        normalised_product = str(product or "").strip().lower()
-        base_label = normalised_product.rsplit("/", 1)[-1]
-        if not version and (
-            normalised_product in _GENERIC_SERVICE_LABELS
-            or base_label in _GENERIC_SERVICE_LABELS
-        ):
+        # NVD's keywordSearch has no version awareness at all — without a
+        # version, "success" only ever means "the product name appeared
+        # somewhere in NVD's text for *some* CVE, from *some* year". This was
+        # first caught for bare protocol labels ("http", "ssh" — what the
+        # socket-scan fallback returns with no nmap installed): the reporter
+        # once cited 1999-2001-era CVEs for a defunct antivirus proxy as
+        # CRITICAL findings for a target almost certainly not running it.
+        # Live re-verified this week with a real crew run (OpenRouter +
+        # scanme.nmap.org): the recon agent, unprompted, guessed the product
+        # name "Apache HTTP Server" for a service nmap itself could only
+        # fingerprint as "ssl/http" — not a generic label our old check would
+        # catch — and cve_lookup("Apache HTTP Server", "") returned 10 of 471
+        # totally real, totally unrelated CVEs spanning Apache's entire
+        # history. An LLM inventing a plausible-sounding product name defeats
+        # any check keyed on specific known-generic strings; the only thing
+        # that actually generalises is refusing *any* unversioned lookup,
+        # invented product name or not.
+        if not version:
             return {
                 "status": "insufficient_data",
                 "product": product,
@@ -488,12 +477,11 @@ class SecurityTools:
                 "cve_count": 0,
                 "cves": [],
                 "message": (
-                    f"No version was detected for '{product}' — it is a bare protocol "
-                    "label, not a specific product. A keyword search on a word this "
-                    "generic would match unrelated historical CVEs by chance, not real "
-                    "findings for this target. Install nmap (or otherwise fingerprint "
-                    "the exact product and version) before correlating CVEs for this "
-                    "service."
+                    f"No version was provided for '{product}' — a keyword-only search "
+                    "with no version matches CVEs across that product's entire history, "
+                    "unrelated to what's actually running on this target. Fingerprint "
+                    "the exact version (e.g. via nmap -sV) before correlating CVEs for "
+                    "this service."
                 ),
             }
 
@@ -504,15 +492,16 @@ class SecurityTools:
         # NVD's keywordSearch requires *every* token to appear in the CVE text.
         # "openssh 8.0" therefore matched nothing, so any versioned lookup
         # silently returned zero CVEs and every service was rated "low".
-        # Query by CPE when a version is known, and fall back to a keyword
-        # search on the product alone. The vendor is resolved dynamically
-        # against NVD's own CPE dictionary (throttled + cached) rather than
-        # guessed from a small static table.
-        attempts = []
-        if version:
-            vendor = self._resolve_cpe_vendor(product)
-            attempts.append(("cpe", {"virtualMatchString": _cpe_for(vendor, product, version)}))
-        attempts.append(("keyword", {"keywordSearch": product}))
+        # Query by CPE first (a version is always present past the guard
+        # above), falling back to a keyword search on the product alone if
+        # the CPE match misses. The vendor is resolved dynamically against
+        # NVD's own CPE dictionary (throttled + cached) rather than guessed
+        # from a small static table.
+        vendor = self._resolve_cpe_vendor(product)
+        attempts = [
+            ("cpe", {"virtualMatchString": _cpe_for(vendor, product, version)}),
+            ("keyword", {"keywordSearch": product}),
+        ]
 
         last_error = None
         for strategy, extra in attempts:
