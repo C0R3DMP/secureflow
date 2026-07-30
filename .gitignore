@@ -18,14 +18,19 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+# Anchored to repo root: unanchored `lib/`/`lib64/` also matched
+# frontend/src/lib/, silently excluding it (and auth.ts) from every commit
+# since the initial commit — the frontend was never buildable from a clean
+# clone as a result. These are Python packaging build directories, not
+# meant to reach into frontend/.
+/build/
 develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
