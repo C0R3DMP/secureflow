@@ -5,6 +5,8 @@ Before these fixes the dev tools returned fixed values for any input:
 numbers were fed to an LLM as tool output and written into review reports.
 """
 
+import json
+
 import pytest
 
 from secureflow.analysis import analyse_python, review_metrics, syntax_check
@@ -810,3 +812,140 @@ def test_lookup_cve_catches_nmap_ssl_tunnel_notation():
     for label in ("ssl/http", "ssl/https", "ssl/imap", "tls/ftp"):
         result = tools.lookup_cve(label, "")
         assert result["status"] == "insufficient_data", label
+
+
+# ---------------------------------------------------------------------------
+# Nuclei active-verification pass
+#
+# Roadmap item "Now #2". Live-verified end-to-end against scanme.nmap.org
+# after building nuclei from source and cloning its templates: -id CVE-XXXX
+# genuinely confirms behaviour (Apache/2.4.7 detected via a real active
+# probe), and a nonexistent template id exits nonzero with "no templates
+# provided for scan" on stderr — the signal used to distinguish "no template
+# exists for this CVE" from "ran and found nothing".
+# ---------------------------------------------------------------------------
+
+def test_verify_with_nuclei_rejects_malformed_cve_id():
+    """cve_id feeds into argv as -id <value> — validate the shape rather than
+    trust it, even though list-form subprocess.run already prevents injection."""
+    from secureflow.crew.tools import SecurityTools
+
+    result = SecurityTools().verify_with_nuclei("example.com", "not-a-cve")
+    assert result["status"] == "error"
+
+
+def test_verify_with_nuclei_rejects_invalid_target():
+    from secureflow.crew.tools import SecurityTools
+
+    result = SecurityTools().verify_with_nuclei("--script=/tmp/evil.nse", "CVE-2021-41773")
+    assert result["status"] == "error"
+
+
+def test_verify_with_nuclei_reports_not_installed(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: None)
+
+    result = tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-2021-41773")
+    assert result["status"] == "not_installed"
+
+
+def test_verify_with_nuclei_distinguishes_no_template_from_no_match(monkeypatch):
+    """Live-verified: nuclei exits nonzero with 'no templates provided for
+    scan' on stderr when -id matches no template file at all — distinct from
+    running cleanly and simply not matching."""
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: "/usr/local/bin/nuclei")
+
+    class _NoTemplate:
+        returncode = 1
+        stdout = ""
+        stderr = "[FTL] Could not run nuclei: no templates provided for scan"
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", lambda *a, **k: _NoTemplate())
+
+    result = tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-9999-99999")
+    assert result["status"] == "no_template"
+
+
+def test_verify_with_nuclei_reports_confirmed_on_real_match(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: "/usr/local/bin/nuclei")
+
+    finding_line = json.dumps({
+        "template-id": "CVE-2021-41773",
+        "matched-at": "http://example.com/icons/.%2e/%2e%2e/etc/passwd",
+    })
+
+    class _Match:
+        returncode = 0
+        stdout = finding_line + "\n"
+        stderr = ""
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", lambda *a, **k: _Match())
+
+    result = tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-2021-41773")
+    assert result["status"] == "confirmed"
+    assert result["template_id"] == "CVE-2021-41773"
+
+
+def test_verify_with_nuclei_ran_no_match_never_reads_as_safe(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: "/usr/local/bin/nuclei")
+
+    class _NoMatch:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", lambda *a, **k: _NoMatch())
+
+    result = tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-2021-41773")
+    assert result["status"] == "ran_no_match"
+    assert "does not prove" in result["message"]
+
+
+def test_verify_with_nuclei_excludes_invasive_template_categories(monkeypatch):
+    """Even 'safe' detection templates can send moderately invasive probes
+    (verified live: an info-severity WAF-detection template sends a
+    script-tag payload) — fuzz/dos/intrusive tags must be excluded."""
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: "/usr/local/bin/nuclei")
+    captured = {}
+
+    class _Resp:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _Resp()
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", _fake_run)
+
+    tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-2021-41773")
+
+    assert "-etags" in captured["cmd"]
+    etags_value = captured["cmd"][captured["cmd"].index("-etags") + 1]
+    assert "intrusive" in etags_value and "fuzz" in etags_value and "dos" in etags_value
+
+
+def test_verify_with_nuclei_times_out_gracefully(monkeypatch):
+    import subprocess as subprocess_mod
+
+    import secureflow.crew.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod.shutil, "which", lambda name: "/usr/local/bin/nuclei")
+
+    def _timeout(cmd, **kwargs):
+        raise subprocess_mod.TimeoutExpired(cmd, kwargs.get("timeout", 45))
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", _timeout)
+
+    result = tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-2021-41773")
+    assert result["status"] == "error"

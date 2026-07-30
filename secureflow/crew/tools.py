@@ -1,3 +1,4 @@
+import shutil
 import socket
 import subprocess
 import json
@@ -602,6 +603,117 @@ class SecurityTools:
 
         return recommendations
 
+    def verify_with_nuclei(self, target: str, cve_id: str, timeout: int = 45) -> Dict[str, Any]:
+        """
+        Actively verify one specific CVE against a target using a matching
+        Nuclei template, if one exists.
+
+        This is a real, active probe against the target — not a passive
+        lookup. It sends live requests and inspects the actual response,
+        which is what separates "this version string matches a known-CVE
+        entry" from "this specific behaviour was observed". Only call this
+        against a target you are explicitly authorised to test, and only
+        after lookup_cve()/assess_vulnerability() has already identified a
+        specific CVE worth confirming — this doesn't replace that step.
+
+        Verified live: even an "info"-severity, "safe" detection template
+        (WAF detection) sends a script-tag probe as part of its fingerprint,
+        so this excludes fuzzing/DoS/intrusive-tagged templates and runs
+        at a deliberately low rate limit — but it is still an active probe,
+        not a passive one, and should be used judiciously rather than on
+        every finding.
+
+        Returns status:
+          - "confirmed"     — the template matched: real, observed evidence,
+                               not just a version-string correlation.
+          - "not_installed" — nuclei isn't available; the passive CVE match
+                               stands unconfirmed, not disproven.
+          - "no_template"   — no Nuclei template exists for this CVE. Common —
+                               most CVEs never get one. Not a signal either way.
+          - "ran_no_match"  — the probe executed and found nothing. This is
+                               NOT proof the target is safe: auth, a
+                               non-default config, or WAF interference can all
+                               hide a real vulnerability from a single probe.
+          - "error"         — the check itself failed to run.
+        """
+        try:
+            validated = validate_target(target)
+        except InvalidTarget as exc:
+            return {"status": "error", "message": str(exc)}
+
+        if not re.fullmatch(r"CVE-\d{4}-\d{4,}", cve_id or "", re.IGNORECASE):
+            return {
+                "status": "error",
+                "message": f"{cve_id!r} doesn't look like a CVE id (expected e.g. CVE-2021-41773)",
+            }
+
+        if not shutil.which("nuclei"):
+            return {
+                "status": "not_installed",
+                "message": "nuclei is not installed; this finding remains unconfirmed by active probing.",
+            }
+
+        cmd = [
+            "nuclei",
+            "-target", validated,
+            "-id", cve_id,
+            "-jsonl",
+            "-silent",
+            "-rate-limit", "10",
+            # Even "safe" detection templates can send moderately invasive
+            # probes (verified live) — exclude categories that go further
+            # than confirming a specific CVE's signature.
+            "-etags", "fuzz,dos,intrusive",
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "message": f"nuclei did not finish within {timeout}s"}
+        except FileNotFoundError:
+            return {"status": "not_installed", "message": "nuclei is not installed"}
+        except Exception as exc:
+            return {"status": "error", "message": f"nuclei failed to run: {exc}"}
+
+        if result.returncode != 0:
+            stderr = (result.stderr or "").lower()
+            if "no templates" in stderr:
+                return {
+                    "status": "no_template",
+                    "cve_id": cve_id,
+                    "message": f"No Nuclei template exists for {cve_id} — most CVEs never get one.",
+                }
+            return {"status": "error", "message": (result.stderr or "nuclei exited with an error").strip()}
+
+        findings = []
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                findings.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+        if findings:
+            return {
+                "status": "confirmed",
+                "cve_id": cve_id,
+                "template_id": findings[0].get("template-id"),
+                "matched_at": findings[0].get("matched-at"),
+                "message": f"Active probe confirmed {cve_id} — observed behaviour, not just a version match.",
+            }
+
+        return {
+            "status": "ran_no_match",
+            "cve_id": cve_id,
+            "message": (
+                f"The active probe for {cve_id} ran and found no match. This does not "
+                "prove the target is safe — the probe may not cover this target's exact "
+                "configuration, or the service may require authentication to reach."
+            ),
+        }
+
 security_tools = SecurityTools()
 
 @tool("Run Nmap Scan")
@@ -620,6 +732,25 @@ def lookup_cves(product: str) -> str:
 def assess_service(port: str, service: str) -> str:
     """Assess vulnerability risk level of a service running on a specific port."""
     result = security_tools.assess_vulnerability(port, service)
+    return json.dumps(result, indent=2)
+
+@tool("Actively Verify CVE")
+def verify_cve_actively(target: str, cve_id: str) -> str:
+    """
+    Send a real, active probe to confirm one specific CVE against the target,
+    using a matching Nuclei template if one exists. This goes further than a
+    version-string match: it observes real behaviour on the live target.
+
+    Use this judiciously, not on every finding — it makes an additional live
+    request against the target, only for CVEs you have already identified via
+    CVE lookup that are worth confirming (e.g. the highest-severity ones you
+    intend to lead the report with). It is not a substitute for that lookup.
+
+    A "ran_no_match" result does NOT mean the target is safe from this CVE —
+    it means this specific probe didn't trigger. Never report the absence of
+    a match as a clean bill of health.
+    """
+    result = security_tools.verify_with_nuclei(target, cve_id)
     return json.dumps(result, indent=2)
 
 

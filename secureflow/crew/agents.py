@@ -1,6 +1,6 @@
 from crewai import Agent, LLM
 from secureflow.crew.tools import (
-    run_nmap_scan, lookup_cves, assess_service,
+    run_nmap_scan, lookup_cves, assess_service, verify_cve_actively,
     save_findings_to_context, read_context_findings,
     get_all_findings, get_latest_findings
 )
@@ -74,13 +74,20 @@ class CrewAgents:
                 "   - Use lookup_cves to find CVEs\n"
                 "   - Use assess_service to test exploitability\n"
                 "   - Rate: CRITICAL | HIGH | MEDIUM | LOW\n"
-                "3. Identify attack chains (RCE, lateral movement, escalation)\n"
-                "4. Top 5 exploitable vulns with real-world PoC approaches\n"
-                "5. Save analysis: save_findings_to_context key='vulnerability_analysis'\n"
+                "3. For your highest-priority findings only (not every CVE — this sends a "
+                "real, active request to the target), optionally call verify_cve_actively "
+                "to confirm the single most important one with observed behaviour rather "
+                "than just a version match. Skip it if it's unavailable (not_installed) or "
+                "has no matching template (no_template) — both are common and not a problem. "
+                "If it comes back ran_no_match, that means the probe found nothing, NOT that "
+                "the target is safe from that CVE — never report it as ruled out.\n"
+                "4. Identify attack chains (RCE, lateral movement, escalation)\n"
+                "5. Top 5 exploitable vulns with real-world PoC approaches\n"
+                "6. Save analysis: save_findings_to_context key='vulnerability_analysis'\n"
                 "\nNever overlook critical vulnerabilities. Focus on exploitability, not just CVSS scores. "
                 "Quality analysis catches real breaches."
             ),
-            tools=[assess_service, lookup_cves, read_context_findings, save_findings_to_context, get_all_findings],
+            tools=[assess_service, lookup_cves, verify_cve_actively, read_context_findings, save_findings_to_context, get_all_findings],
             verbose=True,
             max_iter=7,
             allow_delegation=False,
