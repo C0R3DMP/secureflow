@@ -111,7 +111,7 @@ def build(task, language, output):
 @click.argument("target")
 @click.option(
     "--format", "fmt",
-    type=click.Choice(["html", "pdf", "json"], case_sensitive=False),
+    type=click.Choice(["html", "pdf", "json", "sarif"], case_sensitive=False),
     default="html",
     show_default=True,
     help="Output report format.",

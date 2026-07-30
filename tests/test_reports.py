@@ -61,6 +61,28 @@ def test_export_json_creates_valid_file():
         assert "timestamp" in data["meta"]
 
 
+def test_export_json_includes_structured_findings():
+    with_findings = {
+        **_MOCK_RESULT,
+        "findings": [
+            {"severity": "critical", "source": "openssh 8.0", "reference": "CVE-2024-0001",
+             "confidence": "likely", "description": "d"}
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _exporter(tmp).to_json(with_findings, "test.local")
+        data = json.loads(Path(path).read_text())
+        assert data["findings"][0]["reference"] == "CVE-2024-0001"
+        assert data["findings"][0]["confidence"] == "likely"
+
+
+def test_export_json_findings_default_to_empty_list():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _exporter(tmp).to_json(_MOCK_RESULT, "test.local")
+        data = json.loads(Path(path).read_text())
+        assert data["findings"] == []
+
+
 def test_export_json_failed_scan():
     failed = {**_MOCK_RESULT, "success": False}
     with tempfile.TemporaryDirectory() as tmp:
@@ -76,6 +98,46 @@ def test_export_pdf_creates_file():
         assert Path(path).exists()
         assert Path(path).suffix == ".pdf"
         assert Path(path).stat().st_size > 0
+
+
+def test_export_sarif_creates_valid_file():
+    with_findings = {
+        **_MOCK_RESULT,
+        "findings": [
+            {"severity": "critical", "source": "openssh 8.0", "reference": "CVE-2024-0001",
+             "confidence": "confirmed", "description": "Remote code execution"},
+            {"severity": "medium", "source": "http", "reference": "CVE-2024-0002",
+             "confidence": "possible", "description": ""},
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _exporter(tmp).to_sarif(with_findings, "test.local")
+        assert Path(path).suffix == ".sarif"
+        data = json.loads(Path(path).read_text())
+
+        assert data["version"] == "2.1.0"
+        run = data["runs"][0]
+        assert run["tool"]["driver"]["name"] == "SecureFlow"
+        rule_ids = {r["id"] for r in run["tool"]["driver"]["rules"]}
+        assert rule_ids == {"CVE-2024-0001", "CVE-2024-0002"}
+
+        results_by_rule = {r["ruleId"]: r for r in run["results"]}
+        assert results_by_rule["CVE-2024-0001"]["level"] == "error"
+        assert results_by_rule["CVE-2024-0001"]["properties"]["confidence"] == "confirmed"
+        assert results_by_rule["CVE-2024-0002"]["level"] == "warning"
+
+
+def test_export_sarif_with_no_findings_is_still_valid():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _exporter(tmp).to_sarif(_MOCK_RESULT, "test.local")
+        data = json.loads(Path(path).read_text())
+        assert data["runs"][0]["results"] == []
+
+
+def test_export_dispatch_sarif():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _exporter(tmp).export("sarif", _MOCK_RESULT, "test.local")
+        assert path.endswith(".sarif")
 
 
 def test_export_dispatch_html():
@@ -122,3 +184,4 @@ def test_scan_cli_has_format_option():
     assert "html" in result.output
     assert "pdf" in result.output
     assert "json" in result.output
+    assert "sarif" in result.output
