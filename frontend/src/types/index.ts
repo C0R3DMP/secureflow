@@ -23,6 +23,19 @@ export interface PhaseStatus {
   duration?: number
 }
 
+/**
+ * Best-effort, locally-tracked request budget for one provider — see
+ * secureflow/quota.py. Never authoritative: the server can't query a
+ * provider's real remaining quota in advance, only report what this process
+ * has itself attempted today (UTC) plus whatever a 429 has revealed.
+ */
+export interface QuotaSnapshot {
+  attemptsToday: number
+  knownLimit: number | null
+  exhaustedAt: string | null
+  estimate: true
+}
+
 export interface Provider {
   name: 'claude' | 'gemini' | 'openrouter' | 'ollama' | 'opencode'
   /** 'unknown' until the first /api/providers response lands. */
@@ -30,6 +43,7 @@ export interface Provider {
   priority: number
   lastCheck?: Date
   mode?: 'cli' | 'api'
+  quota?: QuotaSnapshot
 }
 
 /** Ordered from most to least severe. */

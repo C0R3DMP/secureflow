@@ -366,8 +366,11 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperatur
 
         def call(self, *args, **kwargs):
             """Execute with intelligent rate limit handling."""
+            from secureflow import quota
+
             attempt = 0
             while attempt <= self.max_retries:
+                quota.record_attempt("gemini")
                 try:
                     return super().call(*args, **kwargs)
                 except Exception as e:
@@ -375,6 +378,7 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperatur
 
                     # Check for rate limit (429)
                     if "429" in error_str or "rate limit" in error_str or "quota" in error_str:
+                        quota.record_quota_exhausted("gemini", str(e))
                         attempt += 1
                         if attempt > self.max_retries:
                             logger.warning(f"Gemini rate limited after {self.max_retries} retries, falling back...")
@@ -411,7 +415,20 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperatur
                 model=model,
                 api_key=GEMINI_API_KEY,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                # Adding crewai[google-genai] earlier made native Gemini
+                # construction succeed — but CrewAI's LLM.__new__ then returns
+                # a raw GeminiCompletion instance from a different class
+                # hierarchy entirely, not an instance of this subclass at all
+                # (verified directly: isinstance() was False, its MRO didn't
+                # even include LLM). The custom retry-with-backoff logic below
+                # silently never ran. Forcing the universal litellm path here
+                # is what makes `class RateLimitAwareGeminiLLM(LLM)` actually
+                # apply — confirmed: only works now because the dependency
+                # exists; before that fix this flag didn't help at all, since
+                # the native class failed to import before this check was
+                # even reached.
+                is_litellm=True,
             )
         except Exception as e:
             logger.error(f"Failed to create Gemini LLM: {e}")

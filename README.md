@@ -17,6 +17,8 @@ SecureFlow is an AI-powered security assessment and application development plat
 - **Analyst Agent** — Vulnerability analysis, exploitability assessment, attack chain identification
 - **Reporter Agent** — Executive reporting, CVSS scoring, 90-day remediation roadmap
 - CVE lookup queries both **NVD** (CPE-matched) and **OSV** (package-matched), merged and deduplicated — either alone has real coverage gaps
+- CPE vendors are resolved dynamically against NVD's own dictionary, not guessed from a static table
+- Optional **active verification** via [Nuclei](https://github.com/projectdiscovery/nuclei) (if installed) — the analyst can confirm its highest-priority CVE with a real, safe probe rather than a version-string match alone; used judiciously, one CVE at a time, never as proof a target is safe when nothing matches
 
 ### 💻 Development Workflow
 - **Architect Agent** — System design, tech stack selection, project structure planning
@@ -34,6 +36,7 @@ SecureFlow is an AI-powered security assessment and application development plat
 - Severity summary derived from real CVSS scores (NVD + OSV)
 - In-app report preview (rendered in a sandboxed iframe) plus download
 - Light and dark themes; keyboard shortcut `⌘K` / `Ctrl+K` to focus the target field
+- Best-effort LLM request budget per provider (e.g. "~17/20 used today (est.)") — surfaced before a scan starts, not just as a raw 429 after one fails; never authoritative, since free-tier providers don't expose a real remaining-quota check
 
 ### 🎯 Core Capabilities
 - Multi-agent collaborative workflows with shared context

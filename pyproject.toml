@@ -66,7 +66,10 @@ packages = ["secureflow", "secureflow.crew"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
-addopts = "-v --strict-markers"
+addopts = "-v --strict-markers -m \"not live_network\""
+markers = [
+    "live_network: hits real network services (nmap, NVD, OSV) — excluded by default; run explicitly with -m live_network or via the weekly canary workflow",
+]
 
 [tool.black]
 line-length = 100

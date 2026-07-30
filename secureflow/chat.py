@@ -160,6 +160,8 @@ def stream_reply(
     """
     import litellm
 
+    from secureflow import quota
+
     candidates = _candidate_models()
     if not candidates:
         raise NoProviderConfigured(
@@ -172,8 +174,10 @@ def stream_reply(
     errors: List[str] = []
     for call in candidates:
         model = call["model"]
+        provider = model.split("/", 1)[0]
         try:
             logger.info("Chat completion via %s", model)
+            quota.record_attempt(provider)
             stream = litellm.completion(
                 messages=payload,
                 temperature=temperature,
@@ -196,6 +200,9 @@ def stream_reply(
             errors.append(f"{model}: returned an empty response")
 
         except Exception as exc:
+            error_text = str(exc)
+            if "429" in error_text or "quota" in error_text.lower() or "rate limit" in error_text.lower():
+                quota.record_quota_exhausted(provider, error_text)
             logger.warning("Chat provider %s failed: %s", model, exc)
             errors.append(f"{model}: {exc}")
             continue

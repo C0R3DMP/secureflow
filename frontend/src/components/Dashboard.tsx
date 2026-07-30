@@ -215,11 +215,20 @@ export function Dashboard() {
         prev.map((provider) => {
           const info = data[provider.name]
           if (!info) return { ...provider, status: 'unavailable' as const }
+          const q = info.quota
           return {
             ...provider,
             status: info.available ? ('available' as const) : ('unavailable' as const),
             mode: info.mode ?? undefined,
             lastCheck: new Date(),
+            quota: q
+              ? {
+                  attemptsToday: q.attempts_today ?? 0,
+                  knownLimit: q.known_limit ?? null,
+                  exhaustedAt: q.exhausted_at ?? null,
+                  estimate: true,
+                }
+              : undefined,
           }
         }),
       )

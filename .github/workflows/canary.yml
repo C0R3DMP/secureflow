@@ -1,0 +1,43 @@
+name: Live-network canary
+
+# Every other CI job mocks the network so pushes stay fast and deterministic.
+# That's the right default — it's also exactly why six real defects (a false
+# "complete" report on total failure, a primary provider that couldn't
+# construct at all, a fabricated CVE table, a 60s timeout that silently
+# discarded any real nmap scan, two wrong CPE vendors) were invisible to a
+# fully green test suite until someone actually ran the tool against a real
+# target. This workflow is the standing version of that check: it hits real
+# nmap, real NVD, and real OSV, on a schedule, so a regression in that layer
+# doesn't sit undetected for months again.
+#
+# Deliberately excluded from the main `ci.yml` push/PR workflow: an external
+# network dependency has no place gating every commit. No LLM/API key is
+# needed here — this only exercises the deterministic tool layer, not the
+# crew, so it never competes with anyone's provider quota.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  canary:
+    name: Live network + nmap + NVD/OSV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install nmap
+        run: sudo apt-get update && sudo apt-get install -y nmap
+
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run live-network canary tests
+        run: pytest -m live_network -v

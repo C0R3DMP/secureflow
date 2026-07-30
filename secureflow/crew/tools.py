@@ -1,3 +1,4 @@
+import shutil
 import socket
 import subprocess
 import json
@@ -28,25 +29,34 @@ _SERVICE_NAMES = {
 }
 
 
-# Vendor prefixes for the products we most often fingerprint. NVD CPEs are
-# vendor-qualified, so a bare product name will not match.
+# Offline fallback only — used when the live NVD CPE dictionary lookup below
+# is unreachable. Verified against NVD's own dictionary directly: several
+# previous guesses here were simply wrong (mysql -> "oracle" when NVD uses
+# "mysql"; nginx -> "nginx" when NVD uses "igor_sysoev"; vsftpd -> "vsftpd"
+# when NVD uses "vsftpd_project"; redis had no entry and a naive first-hit
+# keyword search resolves to an unrelated "att" product). Corrected from
+# direct verification, not guessed.
 _CPE_VENDORS = {
     "openssh": "openbsd", "ssh": "openbsd",
     "apache": "apache", "httpd": "apache", "tomcat": "apache",
-    "nginx": "nginx", "mysql": "oracle", "mariadb": "mariadb",
-    "postgresql": "postgresql", "redis": "redis", "mongodb": "mongodb",
-    "vsftpd": "vsftpd", "proftpd": "proftpd", "samba": "samba",
+    "nginx": "igor_sysoev", "mysql": "mysql", "mariadb": "mariadb",
+    "postgresql": "postgresql", "redis": "pivotal_software", "mongodb": "mongodb",
+    "vsftpd": "vsftpd_project", "proftpd": "proftpd", "samba": "samba",
     "openssl": "openssl", "bind": "isc", "dovecot": "dovecot",
     "postfix": "postfix", "exim": "exim", "php": "php",
 }
 
 
-def _cpe_for(product: str, version: str) -> str:
+def _normalise_cpe_component(value: str) -> str:
+    return re.sub(r"[^a-z0-9_.-]", "_", str(value).strip().lower())
+
+
+def _cpe_for(vendor: str, product: str, version: str) -> str:
     """Build a CPE 2.3 match string for an NVD virtualMatchString query."""
-    name = re.sub(r"[^a-z0-9_.-]", "_", str(product).strip().lower())
-    ver = re.sub(r"[^a-z0-9_.-]", "_", str(version).strip().lower())
-    vendor = _CPE_VENDORS.get(name, name)
-    return f"cpe:2.3:a:{vendor}:{name}:{ver}"
+    return (
+        f"cpe:2.3:a:{_normalise_cpe_component(vendor)}:"
+        f"{_normalise_cpe_component(product)}:{_normalise_cpe_component(version)}"
+    )
 
 
 def _osv_lookup(product: str, version: str, timeout: int = 10) -> List[Dict[str, Any]]:
@@ -176,11 +186,78 @@ class SecurityTools:
     def __init__(self):
         self.cve_cache = {}
         self.last_api_call = 0.0
+        self._cpe_vendor_cache: Dict[str, str] = {}
         # Structured findings recorded during a scan. These come from real CVSS
         # data returned by NVD — the dashboard summarises these rather than
         # counting severity words in the agents' prose.
         self._findings: List[Dict[str, Any]] = []
         self._findings_lock = threading.Lock()
+
+    def _throttle_nvd(self) -> None:
+        """Shared rate limit across every NVD endpoint this class calls —
+        the public tier is 5 req/30s regardless of which NVD path is hit."""
+        elapsed = time.time() - self.last_api_call
+        remaining = self.NVD_MIN_INTERVAL - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self.last_api_call = time.time()
+
+    def _resolve_cpe_vendor(self, product: str) -> str:
+        """Resolve a product name to its NVD CPE vendor tag dynamically.
+
+        The ~15-entry hardcoded table this replaced was flatly wrong for
+        several common products (verified directly against NVD's own CPE
+        dictionary: mysql, nginx, vsftpd, redis) because it was never checked
+        against real data. Querying the dictionary itself is authoritative and
+        covers products the table never anticipated; the static table now only
+        serves as an offline fallback when NVD is unreachable.
+
+        A naive "trust the first keyword hit" approach is unreliable —
+        keywordSearch is full-text and its top hit can be an unrelated product
+        (verified: "php" surfaced an Adobe product first, "redis" an AT&T
+        one). Filtering to results whose CPE *product* field exactly equals
+        the query, then taking the most common vendor among those, is what
+        actually resolves correctly.
+        """
+        normalised = _normalise_cpe_component(product)
+        if normalised in self._cpe_vendor_cache:
+            return self._cpe_vendor_cache[normalised]
+
+        vendor = self._query_nvd_cpe_dictionary(normalised)
+        if vendor is None:
+            vendor = _CPE_VENDORS.get(normalised, normalised)
+
+        self._cpe_vendor_cache[normalised] = vendor
+        return vendor
+
+    def _query_nvd_cpe_dictionary(self, normalised_product: str) -> Any:
+        """Return the majority-vote vendor for an exact CPE product match, or
+        None if the dictionary is unreachable or has no exact match."""
+        self._throttle_nvd()
+        try:
+            response = requests.get(
+                "https://services.nvd.nist.gov/rest/json/cpes/2.0",
+                params={"keywordSearch": normalised_product, "resultsPerPage": 20},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                return None
+            data = response.json()
+        except (requests.exceptions.RequestException, ValueError):
+            return None
+
+        votes: Dict[str, int] = {}
+        for item in data.get("products", []):
+            cpe_name = (item.get("cpe") or {}).get("cpeName", "")
+            parts = cpe_name.split(":")
+            # cpe:2.3:a:<vendor>:<product>:... — index 4 is the product field.
+            if len(parts) > 4 and parts[4] == normalised_product:
+                vendor = parts[3]
+                votes[vendor] = votes.get(vendor, 0) + 1
+
+        if not votes:
+            return None
+        return max(votes.items(), key=lambda kv: kv[1])[0]
 
     def record_finding(self, severity: str, source: str, reference: str = "") -> None:
         """Record one severity-rated finding for the current scan."""
@@ -382,28 +459,26 @@ class SecurityTools:
         if cache_key in self.cve_cache:
             return self.cve_cache[cache_key]
 
-        # Sleep only for the time still owed since the last call, rather than a
-        # flat 3s on every lookup. `last_api_call` was previously recorded but
-        # never read, so the throttle always paid full price.
-        elapsed = time.time() - self.last_api_call
-        remaining = self.NVD_MIN_INTERVAL - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
-        self.last_api_call = time.time()
-
         # NVD's keywordSearch requires *every* token to appear in the CVE text.
         # "openssh 8.0" therefore matched nothing, so any versioned lookup
         # silently returned zero CVEs and every service was rated "low".
         # Query by CPE when a version is known, and fall back to a keyword
-        # search on the product alone.
+        # search on the product alone. The vendor is resolved dynamically
+        # against NVD's own CPE dictionary (throttled + cached) rather than
+        # guessed from a small static table.
         attempts = []
         if version:
-            attempts.append(("cpe", {"virtualMatchString": _cpe_for(product, version)}))
+            vendor = self._resolve_cpe_vendor(product)
+            attempts.append(("cpe", {"virtualMatchString": _cpe_for(vendor, product, version)}))
         attempts.append(("keyword", {"keywordSearch": product}))
 
         last_error = None
         for strategy, extra in attempts:
             params = {"resultsPerPage": 10, **extra}
+            # Throttle immediately before each real call — this loop can make
+            # two (cpe then keyword), and _resolve_cpe_vendor above may have
+            # made a third; NVD's public rate limit applies across all of them.
+            self._throttle_nvd()
             try:
                 response = requests.get(
                     "https://services.nvd.nist.gov/rest/json/cves/2.0",
@@ -528,6 +603,117 @@ class SecurityTools:
 
         return recommendations
 
+    def verify_with_nuclei(self, target: str, cve_id: str, timeout: int = 45) -> Dict[str, Any]:
+        """
+        Actively verify one specific CVE against a target using a matching
+        Nuclei template, if one exists.
+
+        This is a real, active probe against the target — not a passive
+        lookup. It sends live requests and inspects the actual response,
+        which is what separates "this version string matches a known-CVE
+        entry" from "this specific behaviour was observed". Only call this
+        against a target you are explicitly authorised to test, and only
+        after lookup_cve()/assess_vulnerability() has already identified a
+        specific CVE worth confirming — this doesn't replace that step.
+
+        Verified live: even an "info"-severity, "safe" detection template
+        (WAF detection) sends a script-tag probe as part of its fingerprint,
+        so this excludes fuzzing/DoS/intrusive-tagged templates and runs
+        at a deliberately low rate limit — but it is still an active probe,
+        not a passive one, and should be used judiciously rather than on
+        every finding.
+
+        Returns status:
+          - "confirmed"     — the template matched: real, observed evidence,
+                               not just a version-string correlation.
+          - "not_installed" — nuclei isn't available; the passive CVE match
+                               stands unconfirmed, not disproven.
+          - "no_template"   — no Nuclei template exists for this CVE. Common —
+                               most CVEs never get one. Not a signal either way.
+          - "ran_no_match"  — the probe executed and found nothing. This is
+                               NOT proof the target is safe: auth, a
+                               non-default config, or WAF interference can all
+                               hide a real vulnerability from a single probe.
+          - "error"         — the check itself failed to run.
+        """
+        try:
+            validated = validate_target(target)
+        except InvalidTarget as exc:
+            return {"status": "error", "message": str(exc)}
+
+        if not re.fullmatch(r"CVE-\d{4}-\d{4,}", cve_id or "", re.IGNORECASE):
+            return {
+                "status": "error",
+                "message": f"{cve_id!r} doesn't look like a CVE id (expected e.g. CVE-2021-41773)",
+            }
+
+        if not shutil.which("nuclei"):
+            return {
+                "status": "not_installed",
+                "message": "nuclei is not installed; this finding remains unconfirmed by active probing.",
+            }
+
+        cmd = [
+            "nuclei",
+            "-target", validated,
+            "-id", cve_id,
+            "-jsonl",
+            "-silent",
+            "-rate-limit", "10",
+            # Even "safe" detection templates can send moderately invasive
+            # probes (verified live) — exclude categories that go further
+            # than confirming a specific CVE's signature.
+            "-etags", "fuzz,dos,intrusive",
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "message": f"nuclei did not finish within {timeout}s"}
+        except FileNotFoundError:
+            return {"status": "not_installed", "message": "nuclei is not installed"}
+        except Exception as exc:
+            return {"status": "error", "message": f"nuclei failed to run: {exc}"}
+
+        if result.returncode != 0:
+            stderr = (result.stderr or "").lower()
+            if "no templates" in stderr:
+                return {
+                    "status": "no_template",
+                    "cve_id": cve_id,
+                    "message": f"No Nuclei template exists for {cve_id} — most CVEs never get one.",
+                }
+            return {"status": "error", "message": (result.stderr or "nuclei exited with an error").strip()}
+
+        findings = []
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                findings.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+        if findings:
+            return {
+                "status": "confirmed",
+                "cve_id": cve_id,
+                "template_id": findings[0].get("template-id"),
+                "matched_at": findings[0].get("matched-at"),
+                "message": f"Active probe confirmed {cve_id} — observed behaviour, not just a version match.",
+            }
+
+        return {
+            "status": "ran_no_match",
+            "cve_id": cve_id,
+            "message": (
+                f"The active probe for {cve_id} ran and found no match. This does not "
+                "prove the target is safe — the probe may not cover this target's exact "
+                "configuration, or the service may require authentication to reach."
+            ),
+        }
+
 security_tools = SecurityTools()
 
 @tool("Run Nmap Scan")
@@ -546,6 +732,25 @@ def lookup_cves(product: str) -> str:
 def assess_service(port: str, service: str) -> str:
     """Assess vulnerability risk level of a service running on a specific port."""
     result = security_tools.assess_vulnerability(port, service)
+    return json.dumps(result, indent=2)
+
+@tool("Actively Verify CVE")
+def verify_cve_actively(target: str, cve_id: str) -> str:
+    """
+    Send a real, active probe to confirm one specific CVE against the target,
+    using a matching Nuclei template if one exists. This goes further than a
+    version-string match: it observes real behaviour on the live target.
+
+    Use this judiciously, not on every finding — it makes an additional live
+    request against the target, only for CVEs you have already identified via
+    CVE lookup that are worth confirming (e.g. the highest-severity ones you
+    intend to lead the report with). It is not a substitute for that lookup.
+
+    A "ran_no_match" result does NOT mean the target is safe from this CVE —
+    it means this specific probe didn't trigger. Never report the absence of
+    a match as a clean bill of health.
+    """
+    result = security_tools.verify_with_nuclei(target, cve_id)
     return json.dumps(result, indent=2)
 
 
