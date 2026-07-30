@@ -18,7 +18,7 @@ export type Phase = 'reconnaissance' | 'analysis' | 'reporting'
 
 export interface PhaseStatus {
   name: Phase
-  status: 'pending' | 'running' | 'completed'
+  status: 'pending' | 'running' | 'completed' | 'failed'
   startTime?: Date
   duration?: number
 }

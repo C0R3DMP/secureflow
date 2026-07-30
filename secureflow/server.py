@@ -244,7 +244,22 @@ async def run_security_crew_stream(target: str, ctx: Context) -> dict:
         await ctx.info(f"✅ {label} complete ({n}/{len(_SECURITY_PHASES)})")
         await ctx.report_progress(n, len(_SECURITY_PHASES), f"{label} complete")
 
-    result = await future
+    # crew.kickoff() raises directly (there is no orchestrator wrapper on this
+    # path), so a failed run — e.g. no LLM provider reachable — must be
+    # reported through the MCP error channel rather than left to propagate as
+    # an unhandled exception out of a @app.tool() call.
+    try:
+        result = await future
+    except Exception as exc:
+        logger.error(f"Security crew stream failed: {exc}", exc_info=True)
+        await ctx.error(f"Security assessment failed: {exc}")
+        return {
+            "status": "error",
+            "target": target,
+            "error": str(exc),
+            "message": "Security assessment failed",
+        }
+
     await ctx.info("✅ Security assessment complete!")
 
     return {
@@ -306,7 +321,19 @@ async def stream_scan_sse(request: Request) -> StreamingResponse:
         if result.get('report_html'):
             yield f"data: {json.dumps({'event': 'report_ready', 'report': result.get('report_html'), 'target': target})}\n\n"
 
-        yield f"data: {json.dumps({'event': 'complete', 'result': result.get('message', 'Assessment complete')})}\n\n"
+        # run_security_crew()'s failure branch returns {"success": False,
+        # "error": ...} with no "message" key, so result.get('message', ...)
+        # previously always fell through to a hardcoded default and reported
+        # "Assessment complete" even when the crew never ran — e.g. because no
+        # LLM provider was reachable. Verified live: a scan with no provider
+        # configured showed all three phases green with zero agent messages
+        # and no report. Surface the real failure instead.
+        if result.get('success'):
+            message = result.get('message', 'Assessment complete')
+            yield f"data: {json.dumps({'event': 'complete', 'result': message})}\n\n"
+        else:
+            error = result.get('error', 'Assessment failed for an unknown reason')
+            yield f"data: {json.dumps({'event': 'error', 'message': error})}\n\n"
 
     return StreamingResponse(
         _generate(),

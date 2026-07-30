@@ -285,6 +285,16 @@ export function Dashboard() {
 
         case 'error':
           addLog('error', event.message ?? 'Assessment failed')
+          // Mark whichever phase was in flight as failed, rather than leaving
+          // its spinner running forever — verified live that a crew failure
+          // with no LLM provider previously left the UI showing all phases
+          // green with zero agent activity and no report.
+          setPhases((prev) => {
+            const activeIndex = prev.findIndex((p) => p.status === 'running')
+            if (activeIndex === -1) return prev
+            return prev.map((p, i) => (i === activeIndex ? { ...p, status: 'failed' } : p))
+          })
+          completedRef.current = true
           setIsScanning(false)
           break
       }
