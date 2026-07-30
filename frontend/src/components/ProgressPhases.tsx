@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Loader2 } from 'lucide-react'
+import { Check, Loader2, X } from 'lucide-react'
 import clsx from 'clsx'
 import type { PhaseStatus } from '../types'
 
@@ -13,6 +13,7 @@ const STATUS_TEXT: Record<PhaseStatus['status'], string> = {
   pending: 'Queued',
   running: 'In progress',
   completed: 'Complete',
+  failed: 'Failed',
 }
 
 interface ProgressPhasesProps {
@@ -65,7 +66,14 @@ export function ProgressPhases({ phases }: ProgressPhasesProps) {
                   >
                     {PHASE_LABEL[phase.name]}
                   </p>
-                  <p className="text-xs text-muted">{STATUS_TEXT[phase.status]}</p>
+                  <p
+                    className={clsx(
+                      'text-xs',
+                      phase.status === 'failed' ? 'text-severity-critical' : 'text-muted',
+                    )}
+                  >
+                    {STATUS_TEXT[phase.status]}
+                  </p>
                 </div>
 
                 {phase.startTime && phase.status !== 'pending' && (
@@ -88,6 +96,13 @@ function StepIcon({ status }: { status: PhaseStatus['status'] }) {
     return (
       <span className="relative z-10 flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full bg-severity-none/15 text-severity-none">
         <Check className="h-3 w-3" aria-hidden="true" />
+      </span>
+    )
+  }
+  if (status === 'failed') {
+    return (
+      <span className="relative z-10 flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full bg-severity-critical/15 text-severity-critical">
+        <X className="h-3 w-3" aria-hidden="true" />
       </span>
     )
   }

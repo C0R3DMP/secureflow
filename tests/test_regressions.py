@@ -271,3 +271,133 @@ def test_ui_asset_traversal_blocked_by_handler(monkeypatch, tmp_path):
     response = asyncio.run(server.serve_dashboard_assets(Request(scope)))
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# A failed crew run must be reported as a failure, not as success
+#
+# Live-verified during a manual dashboard test: with no LLM provider reachable,
+# run_security_crew()'s exception branch returns {"success": False, "error":
+# ...} with no "message" key. stream_scan_sse used to do
+# result.get('message', 'Assessment complete'), which fell through to that
+# hardcoded default on every failure. The dashboard showed all three phases
+# green with zero agent messages and no report — a scan that produced nothing
+# but declared total success. run_security_crew_stream (the MCP-protocol
+# equivalent) had a related but different bug: it awaited crew.kickoff()'s
+# future with no try/except at all, so a failure would propagate as an
+# unhandled exception out of an @app.tool() coroutine instead of a clean error.
+# ---------------------------------------------------------------------------
+
+def _drain_sse(async_gen):
+    """Collect an async generator of `data: {...}\\n\\n` frames into dicts."""
+    import asyncio
+    import json
+
+    async def _run():
+        return [chunk async for chunk in async_gen]
+
+    frames = asyncio.run(_run())
+    events = []
+    for frame in frames:
+        for line in frame.splitlines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+    return events
+
+
+def test_stream_emits_error_event_on_crew_failure(monkeypatch):
+    from secureflow import server
+
+    class _FakeOrchestrator:
+        message_queue = __import__("queue").Queue()
+
+        def run_security_crew(self, target):
+            return {"success": False, "error": "No LLM providers available!", "session_log": "x"}
+
+    monkeypatch.setattr(server, "CrewOrchestrator", _FakeOrchestrator)
+
+    import asyncio
+
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/stream/example.com",
+        "headers": [],
+        "query_string": b"",
+        "path_params": {"target": "example.com"},
+    }
+    response = asyncio.run(server.stream_scan_sse(Request(scope)))
+    events = _drain_sse(response.body_iterator)
+
+    kinds = [e.get("event") for e in events]
+    assert "error" in kinds, f"expected an error event, got: {events}"
+    assert "complete" not in kinds, "a failed crew run must not report 'complete'"
+
+    error_event = next(e for e in events if e.get("event") == "error")
+    assert error_event["message"] == "No LLM providers available!"
+
+
+def test_stream_emits_complete_event_on_crew_success(monkeypatch):
+    from secureflow import server
+
+    class _FakeOrchestrator:
+        message_queue = __import__("queue").Queue()
+
+        def run_security_crew(self, target):
+            return {"success": True, "message": "Collaborative security assessment complete"}
+
+    monkeypatch.setattr(server, "CrewOrchestrator", _FakeOrchestrator)
+
+    import asyncio
+
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/stream/example.com",
+        "headers": [],
+        "query_string": b"",
+        "path_params": {"target": "example.com"},
+    }
+    response = asyncio.run(server.stream_scan_sse(Request(scope)))
+    events = _drain_sse(response.body_iterator)
+
+    kinds = [e.get("event") for e in events]
+    assert "complete" in kinds
+    assert "error" not in kinds
+
+
+def test_mcp_stream_tool_reports_crew_failure_instead_of_raising(monkeypatch):
+    """run_security_crew_stream must not let crew.kickoff()'s exception escape."""
+    import asyncio
+
+    from secureflow import server
+
+    def _boom(target, task_callback=None):
+        class _Crew:
+            def kickoff(self):
+                raise RuntimeError("Failed to connect to OpenAI API: Connection error.")
+
+        return _Crew()
+
+    monkeypatch.setattr(server, "create_crew", _boom)
+
+    class _FakeCtx:
+        async def info(self, msg):
+            pass
+
+        async def error(self, msg):
+            self.last_error = msg
+
+        async def report_progress(self, *a, **k):
+            pass
+
+    ctx = _FakeCtx()
+    result = asyncio.run(server.run_security_crew_stream("example.com", ctx))
+
+    assert result["status"] == "error"
+    assert "Connection error" in result["error"]
+    assert ctx.last_error  # ctx.error() was actually called, not just swallowed
