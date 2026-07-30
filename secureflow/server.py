@@ -587,6 +587,7 @@ def _get_providers_dict() -> dict:
         OPENCODE_URL,
         OPENCODE_SERVER_PASSWORD,
     )
+    from secureflow import quota
     import requests
 
     providers = {}
@@ -622,6 +623,19 @@ def _get_providers_dict() -> dict:
         "available": _is_port_open(OPENCODE_URL),
         "mode": "local"
     }
+
+    # Best-effort, locally-tracked request budget — see secureflow/quota.py.
+    # Verified live: a Gemini free-tier key's *daily* quota (separate from the
+    # well-known 5/min limit) was exhausted by a single scan, with the raw
+    # 429 the only signal it ever happened. Surface whatever this process has
+    # observed so far, clearly marked as an estimate.
+    #
+    # litellm's model prefix ("anthropic") differs from this dict's provider
+    # key ("claude") for that one entry; every other key already matches.
+    quota_keys = {"gemini": "gemini", "openrouter": "openrouter", "ollama": "ollama", "claude": "anthropic"}
+    for provider_key, quota_key in quota_keys.items():
+        if provider_key in providers:
+            providers[provider_key]["quota"] = quota.snapshot(quota_key)
 
     return providers
 
