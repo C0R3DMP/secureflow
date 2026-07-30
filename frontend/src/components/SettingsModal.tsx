@@ -62,8 +62,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     }
 
     authFetch('/api/claude-cli-status')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setClaudeCli(d ? { available: d.available, version: d.version } : null))
+      .then((r: Response) => (r.ok ? r.json() : null))
+      .then((d: { available: boolean; version?: string } | null) =>
+        setClaudeCli(d ? { available: d.available, version: d.version } : null),
+      )
       .catch(() => setClaudeCli({ available: false }))
   }, [])
 
