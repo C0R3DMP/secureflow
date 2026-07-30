@@ -122,7 +122,12 @@ class LLMProviderStatus:
             "env_var": "OPENROUTER_API_KEY",
             "type": "api",
             "priority": 2,
-            "model": "openrouter/google/gemini-2.0-flash-exp:free",
+            # OpenRouter deprecates free models without notice — the previous
+            # value here (google/gemini-2.0-flash-exp:free) now 404s with "No
+            # endpoints found", verified live with a real key. This one was
+            # confirmed live against OpenRouter's own /models list and a real
+            # completion call at the same time.
+            "model": "openrouter/openai/gpt-oss-20b:free",
             "base_url": "https://openrouter.ai/api/v1",
         },
         "ollama": {
@@ -190,7 +195,7 @@ def get_fallback_chain():
         chain.append({"model": "gemini/gemini-2.5-flash", "api_key": GEMINI_API_KEY})
     if OPENROUTER_API_KEY:
         chain.append({
-            "model": "openrouter/google/gemini-2.0-flash-exp:free",
+            "model": "openrouter/openai/gpt-oss-20b:free",
             "api_key": OPENROUTER_API_KEY,
             "base_url": "https://openrouter.ai/api/v1",
         })
@@ -481,7 +486,7 @@ def get_best_available_llm(temperature=0.7):
                 if OPENROUTER_API_KEY:
                     logger.info(f"✅ Using OpenRouter (free models)")
                     return LLM(
-                        model="openrouter/google/gemini-2.0-flash-exp:free",
+                        model="openrouter/openai/gpt-oss-20b:free",
                         api_key=OPENROUTER_API_KEY,
                         base_url="https://openrouter.ai/api/v1",
                         temperature=temperature,
