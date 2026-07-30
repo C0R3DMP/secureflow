@@ -445,3 +445,33 @@ def test_broken_provider_falls_through_instead_of_crashing(monkeypatch):
 
     assert "qwen2.5-coder" in llm.model
     assert config_mod.OLLAMA_BASE_URL in (llm.base_url or "")
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter's free models are all reasoning models, and reasoning tokens
+# share the same completion budget as the actual answer.
+#
+# Live-verified with a real end-to-end crew run (OpenRouter + a real target):
+# a real tool-calling turn spent its entire completion budget "thinking"
+# (reasoning_tokens == completion_tokens, both 1189) and returned nothing,
+# which CrewAI surfaced as "Invalid response from LLM call - None or empty."
+# No max_tokens was set on the OpenRouter LLM() call at all. A short test
+# prompt alone doesn't reproduce this — it only shows up once the real
+# prompt (full tool schemas + accumulated context) makes the model reason
+# for longer, so this only asserts on the call, not the failure itself.
+# ---------------------------------------------------------------------------
+
+def test_openrouter_llm_sets_a_generous_max_tokens(monkeypatch):
+    import secureflow.config as config_mod
+
+    monkeypatch.setattr(
+        config_mod.LLMProviderStatus,
+        "get_available_providers",
+        staticmethod(lambda: [("openrouter", 2)]),
+    )
+    monkeypatch.setattr(config_mod, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(config_mod, "OPENROUTER_API_KEY", "fake-key")
+
+    llm = config_mod.get_best_available_llm()
+
+    assert llm.max_tokens and llm.max_tokens >= 4096

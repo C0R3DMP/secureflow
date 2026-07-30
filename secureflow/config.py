@@ -485,11 +485,26 @@ def get_best_available_llm(temperature=0.7):
             elif provider == "openrouter":
                 if OPENROUTER_API_KEY:
                     logger.info(f"✅ Using OpenRouter (free models)")
+                    # Every free model OpenRouter currently offers is a
+                    # reasoning model (verified live against its own /models
+                    # listing — all 14 report "reasoning" as a supported
+                    # parameter), and reasoning tokens count against the same
+                    # completion budget as the actual answer. Live-verified
+                    # failure with no max_tokens set: a real crew tool-call
+                    # turn spent its entire budget "thinking" (reasoning_tokens
+                    # == completion_tokens, both 1189) and returned nothing,
+                    # which CrewAI surfaced as "Invalid response from LLM call
+                    # - None or empty." A short test prompt alone doesn't
+                    # reproduce this — it only shows up once the real prompt
+                    # (full tool schemas + accumulated context) makes the model
+                    # reason for longer. An explicit, generous ceiling is what
+                    # actually leaves room for the answer after the reasoning.
                     return LLM(
                         model="openrouter/openai/gpt-oss-20b:free",
                         api_key=OPENROUTER_API_KEY,
                         base_url="https://openrouter.ai/api/v1",
                         temperature=temperature,
+                        max_tokens=8192,
                     )
             elif provider == "ollama":
                 logger.info(f"✅ Using Ollama (local, free)")
