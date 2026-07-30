@@ -401,3 +401,42 @@ def test_mcp_stream_tool_reports_crew_failure_instead_of_raising(monkeypatch):
     assert result["status"] == "error"
     assert "Connection error" in result["error"]
     assert ctx.last_error  # ctx.error() was actually called, not just swallowed
+
+
+# ---------------------------------------------------------------------------
+# A provider that reports itself available but fails to construct must not
+# take down the whole fallback chain.
+#
+# Live-verified: with a real GEMINI_API_KEY set, get_best_available_llm()
+# raised ImportError from CrewAI's Gemini native-provider import (a missing
+# optional dependency, crewai[google-genai], now added to pyproject.toml).
+# Before this fix, that exception propagated straight out of the function —
+# it never reached the "always try Ollama" fallback the code's own comment
+# promises, even though get_available_providers() had already reported
+# ['gemini'] and nothing else, so there was nowhere left to fall through to.
+# ---------------------------------------------------------------------------
+
+def test_broken_provider_falls_through_instead_of_crashing(monkeypatch):
+    import secureflow.config as config_mod
+
+    monkeypatch.setattr(
+        config_mod.LLMProviderStatus,
+        "get_available_providers",
+        staticmethod(lambda: [("gemini", 1)]),
+    )
+    monkeypatch.setattr(config_mod, "GEMINI_API_KEY", "fake-key")
+
+    def _broken(*a, **k):
+        raise ImportError("Google Gen AI native provider not available")
+
+    monkeypatch.setattr(config_mod, "get_llm_with_rate_limit_fallback", _broken)
+    monkeypatch.setattr(config_mod, "is_ollama_available", lambda *a, **k: True)
+
+    # Fell through to the Ollama safety net instead of the ImportError escaping
+    # out of the function. CrewAI's LLM.__new__ returns a provider-specific
+    # completion subclass rather than the base LLM class, so check the
+    # resolved model/base_url instead of the exact type.
+    llm = config_mod.get_best_available_llm()
+
+    assert "qwen2.5-coder" in llm.model
+    assert config_mod.OLLAMA_BASE_URL in (llm.base_url or "")

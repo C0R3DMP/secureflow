@@ -117,6 +117,11 @@ def _label_for_score(score: float) -> str:
     return "low"
 
 
+# Bare protocol/port labels our own socket-scan fallback assigns when nmap
+# isn't available and no banner/version could be read. Reused from
+# _SERVICE_NAMES so the set can't silently drift from what the scanner emits.
+_GENERIC_SERVICE_LABELS = set(_SERVICE_NAMES.values())
+
 _SEVERITY_LEVELS = ("critical", "high", "medium", "low")
 
 
@@ -204,11 +209,23 @@ class SecurityTools:
         with self._findings_lock:
             self._findings.clear()
 
+    # nmap must wait out a connection timeout on every filtered (non-responding)
+    # port before it can conclude "filtered" rather than "open"/"closed". Live-
+    # verified against scanme.nmap.org — a real, benign, well-known target —
+    # `-sV --top-ports=50` took 107s because 48 of those 50 ports were filtered.
+    # The previous 60s timeout silently discarded every real nmap run against
+    # any target with a real firewall in front of it, falling back to the
+    # socket scanner with no signal that a downgrade had even happened.
+    NMAP_TIMEOUT_SECONDS = 180
+
     def nmap_scan(self, target: str, verbose: bool = False) -> Dict[str, Any]:
         """
         Scan target for open ports and services.
         Primary: nmap -Pn -sV --top-ports=50
-        Fallback: socket-based scanner if nmap unavailable or times out.
+        Fallback: socket-based scanner if nmap is unavailable, times out, or
+        otherwise fails. The fallback result always names the reason so a
+        report can distinguish "no nmap installed" from "nmap timed out" from
+        a genuine scan — the two failure paths were previously indistinguishable.
 
         The target is validated first: an unvalidated value beginning with '-'
         is parsed by nmap as an option, not a host, which turns this into an
@@ -219,6 +236,7 @@ class SecurityTools:
         except InvalidTarget as exc:
             return {"status": "error", "scanner": "none", "target": target, "message": str(exc)}
 
+        fallback_reason = "nmap unavailable"
         try:
             cmd = ["nmap", "-Pn", "-sV", "--top-ports=50"]
             if verbose:
@@ -228,7 +246,7 @@ class SecurityTools:
             cmd.extend(["--", target])
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60
+                cmd, capture_output=True, text=True, timeout=self.NMAP_TIMEOUT_SECONDS
             )
 
             if result.returncode == 0 or (result.stdout and "Nmap scan report" in result.stdout):
@@ -241,19 +259,25 @@ class SecurityTools:
                 }
 
             # nmap ran but returned an error — fall through to socket scan
-            raise RuntimeError(result.stderr or "nmap returned non-zero")
+            fallback_reason = f"nmap returned an error: {result.stderr or 'non-zero exit'}"
+            raise RuntimeError(fallback_reason)
 
         except FileNotFoundError:
-            pass  # nmap not installed → socket fallback
+            fallback_reason = "nmap is not installed"
         except subprocess.TimeoutExpired:
-            pass  # nmap timed out → socket fallback
-        except Exception:
-            pass  # any other nmap error → socket fallback
+            fallback_reason = (
+                f"nmap did not finish within {self.NMAP_TIMEOUT_SECONDS}s "
+                "(a real scan of a filtered target can legitimately take this long)"
+            )
+        except RuntimeError:
+            pass  # fallback_reason already set above
+        except Exception as exc:
+            fallback_reason = f"nmap failed unexpectedly: {exc}"
 
-        # Socket-based fallback
-        return self._socket_scan(target)
+        # Socket-based fallback — always honest about *why* it was used.
+        return self._socket_scan(target, fallback_reason=fallback_reason)
 
-    def _socket_scan(self, target: str, timeout: float = 1.0) -> Dict[str, Any]:
+    def _socket_scan(self, target: str, timeout: float = 1.0, fallback_reason: str = "nmap unavailable") -> Dict[str, Any]:
         """Lightweight socket-based port scanner — no external dependencies."""
         open_ports = []
         try:
@@ -289,7 +313,7 @@ class SecurityTools:
             "target": target,
             "output": "\n".join(output_lines),
             "open_ports": open_ports,
-            "note": "nmap unavailable — used socket scanner (no version detection)",
+            "note": f"{fallback_reason} — used socket scanner (no version detection)",
         }
 
     def parse_nmap_output(self, nmap_output: str) -> List[Dict[str, str]]:
@@ -314,6 +338,46 @@ class SecurityTools:
         Look up CVEs for a product/version via NVD API.
         Rate limited to one request per NVD_MIN_INTERVAL seconds.
         """
+        # A bare protocol/service label ("http", "ssh", ...) with no version is
+        # not enough to identify anything running. Verified live: nmap isn't
+        # installed here, so the socket-scan fallback only ever returns a
+        # generic label like this, and lookup_cve("http", "") fell through to
+        # NVD's keyword search on that single common word — a match against
+        # any of 17,631 CVEs that happen to mention "http" anywhere in 25 years
+        # of NVD history, with no relationship to the actual target. The
+        # reporter agent then wrote 1999-2001-era CVEs (a defunct antivirus
+        # product's HTTP proxy, an abandoned web server) into the report as
+        # CRITICAL findings for a target almost certainly not running either.
+        # Refuse the query rather than let a meaningless keyword match dress
+        # itself up as a confirmed finding.
+        # nmap denotes an SSL/TLS-wrapped service as "tunnel/protocol" (its own
+        # documented convention — e.g. "ssl/http", "ssl/imap"), which the
+        # exact-match check above missed. Verified live against a real nmap
+        # scan of scanme.nmap.org: nmap -sV reported "ssl/http", which is not
+        # literally "http", and lookup_cve("ssl/http", "") fell through to the
+        # same unbounded keyword search this whole check exists to prevent.
+        normalised_product = str(product or "").strip().lower()
+        base_label = normalised_product.rsplit("/", 1)[-1]
+        if not version and (
+            normalised_product in _GENERIC_SERVICE_LABELS
+            or base_label in _GENERIC_SERVICE_LABELS
+        ):
+            return {
+                "status": "insufficient_data",
+                "product": product,
+                "version": version,
+                "cve_count": 0,
+                "cves": [],
+                "message": (
+                    f"No version was detected for '{product}' — it is a bare protocol "
+                    "label, not a specific product. A keyword search on a word this "
+                    "generic would match unrelated historical CVEs by chance, not real "
+                    "findings for this target. Install nmap (or otherwise fingerprint "
+                    "the exact product and version) before correlating CVEs for this "
+                    "service."
+                ),
+            }
+
         cache_key = f"{product}:{version}"
         if cache_key in self.cve_cache:
             return self.cve_cache[cache_key]
@@ -409,16 +473,26 @@ class SecurityTools:
         Assess vulnerability of a service by combining nmap data with CVE lookup.
         """
         cve_data = self.lookup_cve(service, version)
+        status = cve_data.get("status")
 
-        risk_level = "low"
-        if cve_data.get("status") == "success" and cve_data.get("cve_count", 0) > 0:
-            avg_score = sum([c.get("score", 0) for c in cve_data.get("cves", [])]) / max(1, len(cve_data.get("cves", [])))
-            if avg_score >= 9:
-                risk_level = "critical"
-            elif avg_score >= 7:
-                risk_level = "high"
-            elif avg_score >= 4:
-                risk_level = "medium"
+        # "low" means a specific product/version was actually checked and had
+        # no matching CVEs — that's a real, informative result. It must not
+        # also be the default for "we didn't have enough information to check"
+        # (insufficient_data) or "the lookup itself failed" (error): those are
+        # genuinely unknown, not confirmed-safe, and conflating them previously
+        # let a missing nmap scan quietly read as a clean bill of health.
+        if status == "success":
+            risk_level = "low"
+            if cve_data.get("cve_count", 0) > 0:
+                avg_score = sum([c.get("score", 0) for c in cve_data.get("cves", [])]) / max(1, len(cve_data.get("cves", [])))
+                if avg_score >= 9:
+                    risk_level = "critical"
+                elif avg_score >= 7:
+                    risk_level = "high"
+                elif avg_score >= 4:
+                    risk_level = "medium"
+        else:
+            risk_level = "unknown"
 
         return {
             "port": port,
@@ -433,12 +507,20 @@ class SecurityTools:
         recommendations = []
         critical_count = len([v for v in vulnerabilities if v.get("risk_level") == "critical"])
         high_count = len([v for v in vulnerabilities if v.get("risk_level") == "high"])
+        unknown_count = len([v for v in vulnerabilities if v.get("risk_level") == "unknown"])
 
         if critical_count > 0:
             recommendations.append(f"CRITICAL: {critical_count} critical vulnerabilities found. Immediate patching required.")
 
         if high_count > 0:
             recommendations.append(f"HIGH: {high_count} high-risk vulnerabilities. Schedule patching within 30 days.")
+
+        if unknown_count > 0:
+            recommendations.append(
+                f"UNKNOWN: {unknown_count} service(s) could not be matched to a specific "
+                "product/version (no nmap available) — install nmap and re-scan for a "
+                "confident vulnerability assessment rather than treating these as clean."
+            )
 
         recommendations.append("Enable network segmentation to limit lateral movement.")
         recommendations.append("Implement IDS/IPS for suspicious port scanning activity.")

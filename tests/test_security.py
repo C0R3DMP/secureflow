@@ -297,3 +297,50 @@ def test_middleware_disabled_without_secret():
     status, reached = _run_middleware("/api/history", secret="")
     assert status == 200
     assert reached is True
+
+
+def test_nmap_timeout_and_not_installed_are_distinguishable(monkeypatch):
+    """A timed-out real scan must not read the same as 'nmap was never there'.
+
+    Live-verified: nmap -sV --top-ports=50 against scanme.nmap.org (a real,
+    benign target) took 107s because 48 of 50 ports were filtered — nmap must
+    wait out a connection timeout on each one before concluding 'filtered'.
+    The previous 60s subprocess timeout silently discarded that real scan and
+    fell back to the socket scanner with no signal a downgrade had happened.
+    """
+    import subprocess as subprocess_mod
+
+    import secureflow.crew.tools as tools_mod
+
+    def _timeout(cmd, **kwargs):
+        raise subprocess_mod.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", _timeout)
+    monkeypatch.setattr(tools_mod.socket, "gethostbyname", lambda t: "203.0.113.5")
+    monkeypatch.setattr(
+        tools_mod.socket, "create_connection", lambda *a, **k: (_ for _ in ()).throw(OSError())
+    )
+
+    timed_out = tools_mod.SecurityTools().nmap_scan("example.com")
+    assert timed_out["scanner"] == "socket"
+    assert "did not finish within" in timed_out["note"]
+
+    def _not_found(cmd, **kwargs):
+        raise FileNotFoundError("nmap")
+
+    monkeypatch.setattr(tools_mod.subprocess, "run", _not_found)
+    not_installed = tools_mod.SecurityTools().nmap_scan("example.com")
+    assert not_installed["scanner"] == "socket"
+    assert "not installed" in not_installed["note"]
+
+    # The two fallback reasons must read differently — a report distinguishing
+    # "we don't have nmap" from "this specific scan ran out of time" needs
+    # the underlying note text to actually differ, not just the code path.
+    assert timed_out["note"] != not_installed["note"]
+
+
+def test_nmap_scan_uses_a_realistic_timeout_budget():
+    """60s is not enough for a real scan against any filtered target."""
+    from secureflow.crew.tools import SecurityTools
+
+    assert SecurityTools.NMAP_TIMEOUT_SECONDS >= 120
