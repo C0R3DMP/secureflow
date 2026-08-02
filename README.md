@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/C0R3DMP/secureflow/actions/workflows/ci.yml/badge.svg)](https://github.com/C0R3DMP/secureflow/actions/workflows/ci.yml)
-[![Tests: 353 passing](https://img.shields.io/badge/tests-353%20passing-brightgreen)](#testing)
+[![Tests: 359 passing](https://img.shields.io/badge/tests-359%20passing-brightgreen)](#testing)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#project-status)
 
 SecureFlow is an AI-powered security assessment and application development platform. Multi-agent teams (Recon, Analyst, Reporter) collaborate via shared context to execute penetration tests. Supports Claude, Gemini, OpenRouter and Ollama as LLM providers.
@@ -15,7 +15,7 @@ SecureFlow is an AI-powered security assessment and application development plat
 ### 🔒 Security Assessment Workflow
 - **Recon Agent** — Network reconnaissance, port scanning, CVE discovery via nmap (falls back to a built-in socket scanner if nmap isn't installed)
 - **Analyst Agent** — Vulnerability analysis, exploitability assessment, attack chain identification
-- **Reporter Agent** — Executive reporting, CVSS scoring, 90-day remediation roadmap
+- **Reporter Agent** — Executive reporting, CVSS scoring, 90-day remediation roadmap. Every CVE in the report must come from `get_measured_findings()`, the machine-recorded list taken straight from NVD/OSV — the agent may not add well-known vulnerabilities from its own knowledge, and an empty list is reported as "no CVEs could be confirmed" rather than filled in with plausible ones
 - CVE lookup queries both **NVD** (CPE-matched) and **OSV** (package-matched), merged and deduplicated — either alone has real coverage gaps
 - Both halves of the CPE (vendor *and* product) are resolved dynamically against NVD's own dictionary rather than guessed — a scanner's name for a service is often not its CPE name (`Apache httpd` → `apache:http_server`)
 - CVE correlation **requires a real version**. A version-less lookup — or one given a placeholder like `unknown` — returns `insufficient_data` rather than a keyword match against the product's entire CVE history, which is how a scan of an unfingerprintable service used to end up reporting 1999-era CVEs
@@ -49,7 +49,7 @@ SecureFlow is an AI-powered security assessment and application development plat
 - CLI interface (`secureflow --help`)
 - Report export (HTML, PDF, JSON, SARIF)
 - Webhook notifications (HMAC-signed) & scheduled scans
-- 353 automated tests, run in CI on every push and pull request
+- 359 automated tests, run in CI on every push and pull request
 
 ## Quick Start
 
@@ -261,10 +261,10 @@ pytest tests/ --cov=secureflow
 pytest tests/test_chat.py -v
 ```
 
-**353 passing, 2 skipped** (PDF export only, needs the optional `export` extra —
+**359 passing, 2 skipped** (PDF export only, needs the optional `export` extra —
 `pip install -e ".[export]"`). Enforced in CI on every push and pull request
 against `main` (Python 3.10/3.11/3.12, plus a frontend typecheck + build job).
-A further 5 tests hit real network services (nmap, NVD, OSV) and are excluded
+A further 8 tests hit real network services (nmap, NVD, OSV) and are excluded
 by default — run explicitly with `pytest -m live_network`, or via the weekly
 CI canary (`.github/workflows/canary.yml`).
 
@@ -286,7 +286,7 @@ secureflow/
 │       ├── tools.py              # Agent tools (nmap, CVE lookup, code analysis)
 │       ├── orchestrator.py       # Security workflow
 │       └── dev_orchestrator.py   # Development workflow
-├── tests/                        # 353 automated tests
+├── tests/                        # 359 automated tests
 ├── frontend/                     # React dashboard
 ├── server-launcher.py            # Monitored launcher (screen session, auto-restart)
 ├── .github/workflows/ci.yml      # CI: pytest matrix + frontend build
