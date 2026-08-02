@@ -4,6 +4,7 @@ import {
   Crosshair,
   Download,
   Eraser,
+  FileJson,
   FileText,
   History,
   MessageSquare,
@@ -16,6 +17,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
+import { DiffSummary } from './DiffSummary'
 import { LogViewer } from './LogViewer'
 import { ProgressPhases } from './ProgressPhases'
 import { ProviderStatus } from './ProviderStatus'
@@ -32,6 +34,7 @@ import { authFetch, hasToken } from '../lib/auth'
 import {
   SEVERITY_ORDER,
   type AgentMessage,
+  type Finding,
   type LogEntry,
   type PhaseStatus,
   type Provider,
@@ -157,7 +160,9 @@ export function Dashboard() {
   const [providers, setProviders] = useState<Provider[]>(INITIAL_PROVIDERS)
   const [severity, setSeverity] = useState<SeverityCounts>(EMPTY_COUNTS)
   const [hasFindings, setHasFindings] = useState(false)
+  const [diff, setDiff] = useState<{ new: Finding[]; resolved: Finding[] } | null>(null)
 
+  const [showExportMenu, setShowExportMenu] = useState(false)
   const [bottomTab, setBottomTab] = useState<'log' | 'chat'>('log')
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
@@ -269,6 +274,11 @@ export function Dashboard() {
           setHasFindings(true)
           break
 
+        case 'diff_ready':
+          // Only ever sent when this target has a prior recorded scan.
+          setDiff({ new: event.new ?? [], resolved: event.resolved ?? [] })
+          break
+
         case 'phase_complete': {
           const index = (event.n ?? 1) - 1
           advancePhase(index)
@@ -343,6 +353,7 @@ export function Dashboard() {
     setReport(null)
     setSeverity(EMPTY_COUNTS)
     setHasFindings(false)
+    setDiff(null)
     setStartedAt(new Date())
     setPhases([
       { name: 'reconnaissance', status: 'running', startTime: new Date() },
@@ -372,6 +383,38 @@ export function Dashboard() {
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
     addLog('info', 'Report downloaded')
+  }
+
+  /** Structured, per-CVE findings — severity, confidence, CVE reference — as
+   * a file a ticketing system or CI pipeline can actually ingest, unlike the
+   * prose/HTML report. Pulled from the just-completed scan via the same
+   * export endpoint the CLI's `--format` flag uses. */
+  const exportStructured = async (format: 'json' | 'sarif') => {
+    setShowExportMenu(false)
+    if (!activeTarget) return
+    try {
+      const response = await authFetch(
+        `/api/reports/export?target=${encodeURIComponent(activeTarget)}&format=${format}`,
+      )
+      if (!response.ok) {
+        addLog('error', `Could not export ${format.toUpperCase()} findings`)
+        return
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `secureflow-${activeTarget}-${
+        new Date().toISOString().split('T')[0]
+      }.${format}`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      addLog('info', `${format.toUpperCase()} findings exported`)
+    } catch {
+      addLog('error', `Could not reach the server to export ${format.toUpperCase()}`)
+    }
   }
 
   const clearOutput = () => {
@@ -567,6 +610,41 @@ export function Dashboard() {
             >
               <Download className="h-4 w-4" aria-hidden="true" />
             </button>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                disabled={!report}
+                className="icon-btn"
+                aria-label="Export structured findings"
+                aria-haspopup="menu"
+                aria-expanded={showExportMenu}
+                title="Export findings (JSON/SARIF)"
+              >
+                <FileJson className="h-4 w-4" aria-hidden="true" />
+              </button>
+              {showExportMenu && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-10 mt-1 w-40 rounded-md border border-line bg-surface-1 py-1 shadow-lg"
+                >
+                  <button
+                    role="menuitem"
+                    onClick={() => exportStructured('json')}
+                    className="block w-full px-3 py-1.5 text-left text-xs text-ink-secondary hover:bg-surface-2 hover:text-ink"
+                  >
+                    Findings (JSON)
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => exportStructured('sarif')}
+                    className="block w-full px-3 py-1.5 text-left text-xs text-ink-secondary hover:bg-surface-2 hover:text-ink"
+                  >
+                    Findings (SARIF)
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -661,6 +739,8 @@ export function Dashboard() {
               </p>
             )}
           </section>
+
+          <DiffSummary diff={diff} />
 
           <section className="panel p-4">
             <ProviderStatus providers={providers} onRefresh={fetchProviders} />

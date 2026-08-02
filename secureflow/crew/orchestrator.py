@@ -11,6 +11,7 @@ from queue import Empty, Queue
 from secureflow.crew.memory import SharedContext
 from secureflow.crew.tasks import create_crew
 from secureflow.crew.history import SessionHistory
+from secureflow.findings import diff_findings
 from secureflow.security import report_stem, validate_target
 
 _DEFAULT_LOG = str(Path.home() / ".secureflow" / "crew_session.log")
@@ -116,6 +117,12 @@ class CrewOrchestrator:
         self.context.clear()
         clear_message_queue(self.message_queue)
 
+        # Snapshot the last scan of this exact target *before* clearing
+        # findings for this run — this is what the new scan gets diffed
+        # against once it completes. None if this target has never been
+        # scanned before (or only failed previously): nothing to diff against.
+        previous_session = SessionHistory().get_latest_for_target(target, session_type="security")
+
         # Reset the structured findings tally for this scan.
         from secureflow.crew.tools import security_tools
         security_tools.clear_findings()
@@ -190,6 +197,23 @@ class CrewOrchestrator:
             result = crew.kickoff()
             self._emit_findings()
 
+            # Diff this scan's structured findings against the last recorded
+            # scan of this exact target (if any) — "what changed since last
+            # time" is a recon-native question this history already made
+            # possible; it just wasn't being asked.
+            current_findings = security_tools.get_findings()
+            findings_diff = diff_findings(
+                previous_session["findings"] if previous_session else [], current_findings
+            )
+            if previous_session is not None and (findings_diff["new"] or findings_diff["resolved"]):
+                self.message_queue.put({
+                    "event": "diff_ready",
+                    "new": findings_diff["new"],
+                    "resolved": findings_diff["resolved"],
+                    "previous_scan_at": previous_session["completed_at"],
+                    "timestamp": datetime.now().isoformat(),
+                })
+
             self.context.write("session", "target", target)
             self.context.write("session", "result", str(result))
             self.context.write("session", "timestamp", datetime.now().isoformat())
@@ -216,7 +240,8 @@ class CrewOrchestrator:
                 session_type="security",
                 target=target,
                 status="success",
-                summary=summary
+                summary=summary,
+                findings=current_findings,
             )
 
             from secureflow.notifications import NotificationDispatcher
@@ -235,6 +260,8 @@ class CrewOrchestrator:
                 "report_html": report_html,
                 "report_path": str(report_path),
                 "session_log": self.log_path,
+                "findings": current_findings,
+                "diff": findings_diff,
             }
 
         except Exception as e:

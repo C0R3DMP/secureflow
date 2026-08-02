@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/C0R3DMP/secureflow/actions/workflows/ci.yml/badge.svg)](https://github.com/C0R3DMP/secureflow/actions/workflows/ci.yml)
-[![Tests: 253 passing](https://img.shields.io/badge/tests-253%20passing-brightgreen)](#testing)
+[![Tests: 359 passing](https://img.shields.io/badge/tests-359%20passing-brightgreen)](#testing)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#project-status)
 
 SecureFlow is an AI-powered security assessment and application development platform. Multi-agent teams (Recon, Analyst, Reporter) collaborate via shared context to execute penetration tests. Supports Claude, Gemini, OpenRouter and Ollama as LLM providers.
@@ -15,10 +15,14 @@ SecureFlow is an AI-powered security assessment and application development plat
 ### 🔒 Security Assessment Workflow
 - **Recon Agent** — Network reconnaissance, port scanning, CVE discovery via nmap (falls back to a built-in socket scanner if nmap isn't installed)
 - **Analyst Agent** — Vulnerability analysis, exploitability assessment, attack chain identification
-- **Reporter Agent** — Executive reporting, CVSS scoring, 90-day remediation roadmap
+- **Reporter Agent** — Executive reporting, CVSS scoring, 90-day remediation roadmap. Every CVE in the report must come from `get_measured_findings()`, the machine-recorded list taken straight from NVD/OSV — the agent may not add well-known vulnerabilities from its own knowledge, and an empty list is reported as "no CVEs could be confirmed" rather than filled in with plausible ones
 - CVE lookup queries both **NVD** (CPE-matched) and **OSV** (package-matched), merged and deduplicated — either alone has real coverage gaps
-- CPE vendors are resolved dynamically against NVD's own dictionary, not guessed from a static table
+- Both halves of the CPE (vendor *and* product) are resolved dynamically against NVD's own dictionary rather than guessed — a scanner's name for a service is often not its CPE name (`Apache httpd` → `apache:http_server`)
+- CVE correlation **requires a real version**. A version-less lookup — or one given a placeholder like `unknown` — returns `insufficient_data` rather than a keyword match against the product's entire CVE history, which is how a scan of an unfingerprintable service used to end up reporting 1999-era CVEs
 - Optional **active verification** via [Nuclei](https://github.com/projectdiscovery/nuclei) (if installed) — the analyst can confirm its highest-priority CVE with a real, safe probe rather than a version-string match alone; used judiciously, one CVE at a time, never as proof a target is safe when nothing matches
+- Every finding carries a **confidence** level (`confirmed` / `likely` / `possible` / `insufficient_data` / `unknown`) alongside its severity — distinct axes: severity is how bad it would be if real, confidence is how sure we are it applies to this target
+- **Per-target history with diffing** — each scan's structured findings are persisted, and a re-scan of the same target is automatically diffed against the last one: new findings and resolved findings, surfaced live in the dashboard
+- **Structured findings export** — JSON and [SARIF](https://sarifweb.azurewebsites.net/) (`--format sarif`, or the dashboard's export menu), so CI and ticketing systems can ingest real per-CVE data instead of parsing prose
 
 ### 💻 Development Workflow
 - **Architect Agent** — System design, tech stack selection, project structure planning
@@ -37,14 +41,15 @@ SecureFlow is an AI-powered security assessment and application development plat
 - In-app report preview (rendered in a sandboxed iframe) plus download
 - Light and dark themes; keyboard shortcut `⌘K` / `Ctrl+K` to focus the target field
 - Best-effort LLM request budget per provider (e.g. "~17/20 used today (est.)") — surfaced before a scan starts, not just as a raw 429 after one fails; never authoritative, since free-tier providers don't expose a real remaining-quota check
+- "Since last scan" panel — new/resolved findings versus the previous scan of the same target, with a one-click export of structured findings as JSON or SARIF
 
 ### 🎯 Core Capabilities
 - Multi-agent collaborative workflows with shared context
 - FastMCP server with SSE real-time streaming
 - CLI interface (`secureflow --help`)
-- Report export (HTML, PDF, JSON)
+- Report export (HTML, PDF, JSON, SARIF)
 - Webhook notifications (HMAC-signed) & scheduled scans
-- 253 automated tests, run in CI on every push and pull request
+- 359 automated tests, run in CI on every push and pull request
 
 ## Quick Start
 
@@ -160,7 +165,7 @@ scanning proxy for whoever can reach it. The server is built to fail closed.
 
 | Command | Description |
 |---------|-------------|
-| `secureflow scan <target> [--format html\|pdf\|json]` | Run full security assessment |
+| `secureflow scan <target> [--format html\|pdf\|json\|sarif]` | Run full security assessment |
 | `secureflow build <task> [--language X] [--output DIR]` | Generate application code |
 | `secureflow history [--limit N] [--type security\|dev]` | View past scan/build sessions |
 | `secureflow schedule add <target> --cron "..."` | Schedule a recurring scan |
@@ -192,7 +197,7 @@ FastMCP exposes two different kinds of surface — they are not interchangeable:
 | GET | `/api/scans/{scan_id}` | Poll an in-flight scan's status |
 | GET | `/api/history` | Scan history (JSON) |
 | GET | `/api/schedules` | List scheduled scans |
-| GET | `/api/reports/export?target=X&format=html\|pdf\|json` | Export a completed report |
+| GET | `/api/reports/export?target=X&format=html\|pdf\|json\|sarif` | Export a completed report — JSON/SARIF include structured, per-CVE findings |
 | POST | `/api/settings` | Persist provider settings to `~/.secureflow/.env` |
 | POST | `/api/opencode/start` \| `/api/opencode/stop` | Control a local OpenCode server |
 
@@ -256,9 +261,12 @@ pytest tests/ --cov=secureflow
 pytest tests/test_chat.py -v
 ```
 
-**253 passing, 2 skipped** (PDF export only, needs the optional `export` extra —
+**359 passing, 2 skipped** (PDF export only, needs the optional `export` extra —
 `pip install -e ".[export]"`). Enforced in CI on every push and pull request
 against `main` (Python 3.10/3.11/3.12, plus a frontend typecheck + build job).
+A further 8 tests hit real network services (nmap, NVD, OSV) and are excluded
+by default — run explicitly with `pytest -m live_network`, or via the weekly
+CI canary (`.github/workflows/canary.yml`).
 
 ## Project Structure
 
@@ -278,7 +286,7 @@ secureflow/
 │       ├── tools.py              # Agent tools (nmap, CVE lookup, code analysis)
 │       ├── orchestrator.py       # Security workflow
 │       └── dev_orchestrator.py   # Development workflow
-├── tests/                        # 253 automated tests
+├── tests/                        # 359 automated tests
 ├── frontend/                     # React dashboard
 ├── server-launcher.py            # Monitored launcher (screen session, auto-restart)
 ├── .github/workflows/ci.yml      # CI: pytest matrix + frontend build

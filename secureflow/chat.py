@@ -150,7 +150,12 @@ def stream_reply(
     messages: List[Dict[str, str]],
     context: Optional[str] = None,
     temperature: float = 0.3,
-    max_tokens: int = 1024,
+    # Every free OpenRouter model is now a reasoning model whose thinking
+    # tokens share the same completion budget as the visible reply — live-
+    # verified elsewhere in this codebase (config.py's OpenRouter LLM call)
+    # to silently return an empty response once reasoning alone exhausts a
+    # tight budget. 1024 was that tight budget; 4096 leaves real room.
+    max_tokens: int = 4096,
 ) -> Iterator[str]:
     """Yield reply text chunks, trying each configured provider in turn.
 

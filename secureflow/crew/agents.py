@@ -2,7 +2,7 @@ from crewai import Agent, LLM
 from secureflow.crew.tools import (
     run_nmap_scan, lookup_cves, assess_service, verify_cve_actively,
     save_findings_to_context, read_context_findings,
-    get_all_findings, get_latest_findings
+    get_all_findings, get_latest_findings, get_measured_findings
 )
 from secureflow.config import get_best_available_llm
 import os
@@ -43,7 +43,14 @@ class CrewAgents:
                 "Known for being thorough and meticulous - never miss open ports or vulnerable services. "
                 "\n\nYOUR EXACT WORKFLOW:\n"
                 "1. Use 'nmap_scan' tool to scan target comprehensively (top 1000+ ports)\n"
-                "2. For each open port, look up CVEs using 'lookup_cves' tool\n"
+                "2. For each open port, look up CVEs using 'lookup_cves' tool. Pass the "
+                "version as the SEPARATE 'version' argument, never glued onto the product "
+                "name — lookup_cves(product='Apache httpd', version='2.4.7'), NOT "
+                "lookup_cves(product='Apache httpd 2.4.7'). Without a version the lookup "
+                "returns 'insufficient_data' and no CVEs, by design: a version-less search "
+                "matches a product's entire CVE history instead of this target. If the scan "
+                "revealed no version, report it as unknown — never invent a product name or "
+                "version to get a result.\n"
                 "3. Save ALL findings to context with 'save_findings_to_context' key='scan_results'\n"
                 "4. Return structured output: Port | Service | Version | CVEs | Risk\n"
                 "\nYour reconnaissance is the foundation for all downstream security analysis. "
@@ -71,9 +78,17 @@ class CrewAgents:
                 "\n\nYOUR EXACT WORKFLOW:\n"
                 "1. Read recon findings: read_context_findings(agent_name='recon', key='scan_results')\n"
                 "2. For EACH service:\n"
-                "   - Use lookup_cves to find CVEs\n"
-                "   - Use assess_service to test exploitability\n"
+                "   - Use lookup_cves to find CVEs, passing the version as the SEPARATE "
+                "'version' argument (product='Apache httpd', version='2.4.7') — a lookup "
+                "with no version returns 'insufficient_data' by design\n"
+                "   - Use assess_service to test exploitability, passing that same version\n"
                 "   - Rate: CRITICAL | HIGH | MEDIUM | LOW\n"
+                "   - assess_service also returns a separate 'confidence' field "
+                "(confirmed/likely/possible/insufficient_data/unknown) — this is NOT the "
+                "same axis as severity. Severity is how bad it would be if real; confidence "
+                "is how sure we are it applies to THIS target. Report both: a 'possible' "
+                "finding is a keyword-only text match and must not be presented with the "
+                "same certainty as a 'likely' exact-version match or a Nuclei-'confirmed' one.\n"
                 "3. For your highest-priority findings only (not every CVE — this sends a "
                 "real, active request to the target), optionally call verify_cve_actively "
                 "to confirm the single most important one with observed behaviour rather "
@@ -110,11 +125,28 @@ class CrewAgents:
                 "1. Read ALL findings from context:\n"
                 "   - read_context_findings(agent_name='recon', key='scan_results')\n"
                 "   - read_context_findings(agent_name='analyst', key='vulnerability_analysis')\n"
+                "   - get_measured_findings() — the AUTHORITATIVE machine-recorded list of "
+                "every CVE this scan actually matched. Call it, and treat it as the only "
+                "valid source of CVEs. A CVE that is not in that list did not come from "
+                "this scan and MUST NOT appear anywhere in your report — not in the "
+                "findings table, not in the executive summary, not as an example. Never "
+                "add well-known vulnerabilities a service 'typically' has (Heartbleed, "
+                "POODLE, Shellshock and the like) from your own knowledge: a version that "
+                "was never fingerprinted cannot be known to be vulnerable, and inventing "
+                "one is the single worst failure this report can contain.\n"
+                "   - If that list is empty, say so plainly: state that no CVEs could be "
+                "confirmed, explain why (typically no version was fingerprinted), and "
+                "recommend the recon step needed to change that. An honest 'could not "
+                "determine' is a correct report; a fabricated finding is not.\n"
                 "2. Executive Summary (1 page, non-technical):\n"
                 "   - Risk posture, top findings, business impact, timeline\n"
                 "3. Detailed Findings Table:\n"
-                "   - Risk | CVSS | Port | Service | Vulnerability | Impact | Remediation\n"
+                "   - Risk | Confidence | CVSS | Port | Service | Vulnerability | Impact | Remediation\n"
                 "   - Sort by severity (CRITICAL first)\n"
+                "   - Confidence (confirmed/likely/possible/insufficient_data/unknown) came "
+                "from the analyst's assessment — carry it into the table verbatim rather than "
+                "collapsing it into the risk rating; a board reading 'possible' vs 'confirmed' "
+                "needs to see that distinction, not just a severity word.\n"
                 "4. 90-Day Remediation Roadmap:\n"
                 "   - Weeks 1-2: Critical patches | Weeks 3-4: High fixes\n"
                 "   - Month 2: Medium hardening | Month 3: Long-term\n"
@@ -123,7 +155,7 @@ class CrewAgents:
                 "6. Save report: save_findings_to_context key='final_report'\n"
                 "\nWrite reports that get funded and implemented. This may be presented to the board."
             ),
-            tools=[read_context_findings, get_all_findings, get_latest_findings, save_findings_to_context],
+            tools=[read_context_findings, get_all_findings, get_latest_findings, get_measured_findings, save_findings_to_context],
             verbose=True,
             max_iter=4,
             allow_delegation=False,

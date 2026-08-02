@@ -63,12 +63,25 @@ export interface ScanSession {
   summary?: string
 }
 
+/** A confirmed CPE/CVE-lookup result — how sure SecureFlow is that a finding
+ * actually applies to this target, separate from how bad it would be if so. */
+export type Confidence = 'confirmed' | 'likely' | 'possible' | 'insufficient_data' | 'unknown'
+
+export interface Finding {
+  severity: Severity
+  source: string
+  reference: string
+  confidence: Confidence
+  description?: string
+}
+
 export interface StreamEvent {
   event:
     | 'start'
     | 'agent_message'
     | 'phase_complete'
     | 'findings'
+    | 'diff_ready'
     | 'report_ready'
     | 'complete'
     | 'error'
@@ -83,4 +96,8 @@ export interface StreamEvent {
   report?: string
   /** Severity tally from the server, present on 'findings' events. */
   counts?: Partial<SeverityCounts>
+  /** Present on 'diff_ready' events — this target has a previous recorded scan. */
+  new?: Finding[]
+  resolved?: Finding[]
+  previous_scan_at?: string
 }

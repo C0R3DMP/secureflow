@@ -47,6 +47,61 @@ _CPE_VENDORS = {
 }
 
 
+# Service-banner names that don't appear verbatim in NVD's CPE titles, so a
+# keyword search on them returns nothing at all. Verified live: nmap reports
+# Apache's banner as "Apache httpd", but NVD titles it "Apache HTTP Server" —
+# the token "httpd" appears nowhere, so keywordSearch=apache httpd -> 0
+# results while the aliased query resolves correctly to apache:http_server.
+_CPE_QUERY_ALIASES = {
+    "apache httpd": "apache http server",
+    "httpd": "apache http server",
+    "apache2": "apache http server",
+    "apache": "apache http server",
+}
+
+# A trailing version token crammed onto the product name — "Apache httpd
+# 2.4.7". Must start with a digit (optionally 'v') so descriptive trailing
+# words like the "Server" in "Apache HTTP Server" are never mistaken for one.
+_TRAILING_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*[a-z0-9._-]*$", re.IGNORECASE)
+
+
+def _split_product_version(product: str) -> Any:
+    """Split a trailing version off a product string: ("Apache httpd 2.4.7")
+    -> ("Apache httpd", "2.4.7"). Returns (product, "") when there is none.
+
+    Live-verified need: the crew's own recon agent, given a tool with no
+    version parameter, put the version it had correctly fingerprinted into
+    the product name instead. The tool signature is fixed too, but a model
+    can always phrase it this way, so the parsing is kept as a safety net.
+    """
+    text = str(product or "").strip()
+    if " " not in text:
+        return text, ""
+    head, _, tail = text.rpartition(" ")
+    if _TRAILING_VERSION_RE.match(tail):
+        return head.strip(), tail
+    return text, ""
+
+
+def _usable_version(version: str) -> str:
+    """Return the version if it identifies a real release, else "".
+
+    A model asked for a version it does not have will supply a placeholder
+    rather than omit the argument — live-verified, the recon agent called
+    lookup_cves(product="Apache httpd", version="unknown") when nmap had
+    explicitly reported the service as unrecognised. "unknown" is a truthy
+    string, so it sailed past the empty-version guard and reopened exactly
+    the whole-history keyword search that guard exists to prevent, returning
+    1999-era Apache CVEs for a service whose version nobody knew.
+
+    Requiring at least one digit is the check that generalises: every real
+    release identifier has one, and no placeholder a model reaches for
+    ("unknown", "n/a", "unspecified", "latest", "-") does.
+    """
+    text = str(version or "").strip()
+    return text if any(char.isdigit() for char in text) else ""
+
+
 def _normalise_cpe_component(value: str) -> str:
     return re.sub(r"[^a-z0-9_.-]", "_", str(value).strip().lower())
 
@@ -84,9 +139,21 @@ def _osv_lookup(product: str, version: str, timeout: int = 10) -> List[Dict[str,
 
     findings = []
     for vuln in vulns:
-        # Prefer the aliased CVE id so results dedupe against the NVD set.
-        aliases = vuln.get("aliases") or []
-        identifier = next((a for a in aliases if a.startswith("CVE-")), vuln.get("id", ""))
+        # Keep only records that carry a real CVE id, and use it so results
+        # dedupe against the NVD set.
+        #
+        # A query with no ecosystem — which is all we can send, since a service
+        # banner doesn't name one — matches distro *advisories* far more often
+        # than CVEs. Live-verified: nginx 1.18.0 returns 417 OSV records, of
+        # which only 22 carry a CVE alias; the other 395 are RHSA/DSA/USN/
+        # ALPINE/SUSE packaging advisories, each for one distro's own build.
+        # vsftpd 2.3.4 returns 42 records and *none* are CVEs. Recording those
+        # as findings inflated a scan's CVE count by an order of magnitude with
+        # entries that say nothing about the target's actual software.
+        candidates = [vuln.get("id", "")] + list(vuln.get("aliases") or [])
+        identifier = next((c for c in candidates if c.startswith("CVE-")), "")
+        if not identifier:
+            continue
         severity = _osv_severity(vuln)
         findings.append({
             "id": identifier,
@@ -126,11 +193,6 @@ def _label_for_score(score: float) -> str:
         return "medium"
     return "low"
 
-
-# Bare protocol/port labels our own socket-scan fallback assigns when nmap
-# isn't available and no banner/version could be read. Reused from
-# _SERVICE_NAMES so the set can't silently drift from what the scanner emits.
-_GENERIC_SERVICE_LABELS = set(_SERVICE_NAMES.values())
 
 _SEVERITY_LEVELS = ("critical", "high", "medium", "low")
 
@@ -202,42 +264,52 @@ class SecurityTools:
             time.sleep(remaining)
         self.last_api_call = time.time()
 
-    def _resolve_cpe_vendor(self, product: str) -> str:
-        """Resolve a product name to its NVD CPE vendor tag dynamically.
+    def _resolve_cpe(self, product: str) -> Any:
+        """Resolve a product name to its NVD (vendor, product) CPE components.
 
-        The ~15-entry hardcoded table this replaced was flatly wrong for
-        several common products (verified directly against NVD's own CPE
-        dictionary: mysql, nginx, vsftpd, redis) because it was never checked
-        against real data. Querying the dictionary itself is authoritative and
-        covers products the table never anticipated; the static table now only
-        serves as an offline fallback when NVD is unreachable.
+        Both halves have to be resolved, not just the vendor: NVD's CPE
+        *product* field frequently differs from the name a scanner reports.
+        Live-verified against a real crew run — nmap fingerprinted
+        "Apache httpd 2.4.7" (the genuine banner on scanme.nmap.org), whose
+        real CPE is `apache:http_server`, matching 108 real CVEs. Keeping the
+        caller's own string as the product built `apache_httpd:apache_httpd`,
+        which matches nothing, so a correct, versioned lookup still found zero.
 
-        A naive "trust the first keyword hit" approach is unreliable —
-        keywordSearch is full-text and its top hit can be an unrelated product
-        (verified: "php" surfaced an Adobe product first, "redis" an AT&T
-        one). Filtering to results whose CPE *product* field exactly equals
-        the query, then taking the most common vendor among those, is what
-        actually resolves correctly.
+        The query also has to use the *raw* product string, not the
+        underscore-normalised one: keywordSearch is a natural-language text
+        search, so "apache_httpd" returns 0 results where "apache http server"
+        returns 574. Normalising before querying silently broke every
+        multi-word product name; it only ever worked for single-word ones
+        (nginx, redis, php) where normalisation is a no-op.
+
+        Resolution is layered, because neither strategy alone is right
+        (both verified against NVD directly):
+          1. Prefer results whose CPE product field exactly equals the query —
+             a plain majority vote picks whichever product happens to have the
+             most version rows ("php" resolves to `php:blog_cms` that way).
+          2. Otherwise fall back to the majority (vendor, product) pair, which
+             is what resolves descriptive names like "Apache HTTP Server".
         """
-        normalised = _normalise_cpe_component(product)
-        if normalised in self._cpe_vendor_cache:
-            return self._cpe_vendor_cache[normalised]
+        key = str(product or "").strip().lower()
+        if key in self._cpe_vendor_cache:
+            return self._cpe_vendor_cache[key]
 
-        vendor = self._query_nvd_cpe_dictionary(normalised)
-        if vendor is None:
-            vendor = _CPE_VENDORS.get(normalised, normalised)
+        resolved = self._query_nvd_cpe_dictionary(_CPE_QUERY_ALIASES.get(key, key))
+        if resolved is None:
+            normalised = _normalise_cpe_component(product)
+            resolved = (_CPE_VENDORS.get(normalised, normalised), normalised)
 
-        self._cpe_vendor_cache[normalised] = vendor
-        return vendor
+        self._cpe_vendor_cache[key] = resolved
+        return resolved
 
-    def _query_nvd_cpe_dictionary(self, normalised_product: str) -> Any:
-        """Return the majority-vote vendor for an exact CPE product match, or
-        None if the dictionary is unreachable or has no exact match."""
+    def _query_nvd_cpe_dictionary(self, query: str) -> Any:
+        """Return a resolved (vendor, product) pair, or None if the dictionary
+        is unreachable or returns nothing usable."""
         self._throttle_nvd()
         try:
             response = requests.get(
                 "https://services.nvd.nist.gov/rest/json/cpes/2.0",
-                params={"keywordSearch": normalised_product, "resultsPerPage": 20},
+                params={"keywordSearch": query, "resultsPerPage": 50},
                 timeout=15,
             )
             if response.status_code != 200:
@@ -246,28 +318,63 @@ class SecurityTools:
         except (requests.exceptions.RequestException, ValueError):
             return None
 
-        votes: Dict[str, int] = {}
+        pairs: List[Any] = []
         for item in data.get("products", []):
             cpe_name = (item.get("cpe") or {}).get("cpeName", "")
             parts = cpe_name.split(":")
-            # cpe:2.3:a:<vendor>:<product>:... — index 4 is the product field.
-            if len(parts) > 4 and parts[4] == normalised_product:
-                vendor = parts[3]
-                votes[vendor] = votes.get(vendor, 0) + 1
+            # cpe:2.3:a:<vendor>:<product>:... — indexes 3 and 4.
+            if len(parts) > 4:
+                pairs.append((parts[3], parts[4]))
 
-        if not votes:
+        if not pairs:
             return None
+
+        target = _normalise_cpe_component(query)
+        exact = [pair for pair in pairs if pair[1] == target]
+        candidates = exact or pairs
+
+        votes: Dict[Any, int] = {}
+        for pair in candidates:
+            votes[pair] = votes.get(pair, 0) + 1
         return max(votes.items(), key=lambda kv: kv[1])[0]
 
-    def record_finding(self, severity: str, source: str, reference: str = "") -> None:
-        """Record one severity-rated finding for the current scan."""
+    def record_finding(
+        self,
+        severity: str,
+        source: str,
+        reference: str = "",
+        confidence: str = "likely",
+        description: str = "",
+    ) -> None:
+        """Record one severity-rated finding for the current scan.
+
+        `confidence` is a distinct axis from severity: severity is how bad the
+        finding would be if real, confidence is how sure we are it actually
+        applies to this target. A passive CPE version match is "likely", a
+        looser keyword match is "possible", and `mark_confirmed()` upgrades a
+        specific CVE to "confirmed" once an active Nuclei probe observes it —
+        the same verified/unverified distinction the project's own research
+        roadmap called for extending past a single "unknown" risk level.
+        """
         level = _normalise_severity(severity)
         if level is None:
             return
         with self._findings_lock:
-            self._findings.append(
-                {"severity": level, "source": source, "reference": reference}
-            )
+            self._findings.append({
+                "severity": level,
+                "source": source,
+                "reference": reference,
+                "confidence": confidence,
+                "description": description,
+            })
+
+    def mark_confirmed(self, cve_id: str) -> None:
+        """Upgrade a previously recorded finding to "confirmed" once an active
+        probe (verify_with_nuclei) has actually observed it on the target."""
+        with self._findings_lock:
+            for finding in self._findings:
+                if finding["reference"] == cve_id:
+                    finding["confidence"] = "confirmed"
 
     def severity_counts(self) -> Dict[str, int]:
         """Deduplicated counts by severity, keyed on the finding reference."""
@@ -281,6 +388,20 @@ class SecurityTools:
                 seen.add(key)
                 counts[finding["severity"]] += 1
         return counts
+
+    def get_findings(self) -> List[Dict[str, Any]]:
+        """Deduplicated structured findings for the current scan, newest first
+        duplicate discarded — the same dedup key as severity_counts()."""
+        seen = set()
+        out: List[Dict[str, Any]] = []
+        with self._findings_lock:
+            for finding in self._findings:
+                key = finding["reference"] or f"{finding['source']}:{finding['severity']}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(dict(finding))
+        return out
 
     def clear_findings(self) -> None:
         with self._findings_lock:
@@ -415,30 +536,35 @@ class SecurityTools:
         Look up CVEs for a product/version via NVD API.
         Rate limited to one request per NVD_MIN_INTERVAL seconds.
         """
-        # A bare protocol/service label ("http", "ssh", ...) with no version is
-        # not enough to identify anything running. Verified live: nmap isn't
-        # installed here, so the socket-scan fallback only ever returns a
-        # generic label like this, and lookup_cve("http", "") fell through to
-        # NVD's keyword search on that single common word — a match against
-        # any of 17,631 CVEs that happen to mention "http" anywhere in 25 years
-        # of NVD history, with no relationship to the actual target. The
-        # reporter agent then wrote 1999-2001-era CVEs (a defunct antivirus
-        # product's HTTP proxy, an abandoned web server) into the report as
-        # CRITICAL findings for a target almost certainly not running either.
-        # Refuse the query rather than let a meaningless keyword match dress
-        # itself up as a confirmed finding.
-        # nmap denotes an SSL/TLS-wrapped service as "tunnel/protocol" (its own
-        # documented convention — e.g. "ssl/http", "ssl/imap"), which the
-        # exact-match check above missed. Verified live against a real nmap
-        # scan of scanme.nmap.org: nmap -sV reported "ssl/http", which is not
-        # literally "http", and lookup_cve("ssl/http", "") fell through to the
-        # same unbounded keyword search this whole check exists to prevent.
-        normalised_product = str(product or "").strip().lower()
-        base_label = normalised_product.rsplit("/", 1)[-1]
-        if not version and (
-            normalised_product in _GENERIC_SERVICE_LABELS
-            or base_label in _GENERIC_SERVICE_LABELS
-        ):
+        # NVD's keywordSearch has no version awareness at all — without a
+        # version, "success" only ever means "the product name appeared
+        # somewhere in NVD's text for *some* CVE, from *some* year". This was
+        # first caught for bare protocol labels ("http", "ssh" — what the
+        # socket-scan fallback returns with no nmap installed): the reporter
+        # once cited 1999-2001-era CVEs for a defunct antivirus proxy as
+        # CRITICAL findings for a target almost certainly not running it.
+        # Live re-verified this week with a real crew run (OpenRouter +
+        # scanme.nmap.org): the recon agent, unprompted, guessed the product
+        # name "Apache HTTP Server" for a service nmap itself could only
+        # fingerprint as "ssl/http" — not a generic label our old check would
+        # catch — and cve_lookup("Apache HTTP Server", "") returned 10 of 471
+        # totally real, totally unrelated CVEs spanning Apache's entire
+        # history. An LLM inventing a plausible-sounding product name defeats
+        # any check keyed on specific known-generic strings; the only thing
+        # that actually generalises is refusing *any* unversioned lookup,
+        # invented product name or not.
+        #
+        # A placeholder like "unknown" is not a version — see _usable_version.
+        version = _usable_version(version)
+
+        # Before refusing, recover a version the caller crammed onto the
+        # product name ("Apache httpd 2.4.7") — live-verified real model
+        # behaviour, and refusing that would throw away a version we actually
+        # have.
+        if not version:
+            product, version = _split_product_version(product)
+
+        if not version:
             return {
                 "status": "insufficient_data",
                 "product": product,
@@ -446,12 +572,13 @@ class SecurityTools:
                 "cve_count": 0,
                 "cves": [],
                 "message": (
-                    f"No version was detected for '{product}' — it is a bare protocol "
-                    "label, not a specific product. A keyword search on a word this "
-                    "generic would match unrelated historical CVEs by chance, not real "
-                    "findings for this target. Install nmap (or otherwise fingerprint "
-                    "the exact product and version) before correlating CVEs for this "
-                    "service."
+                    f"No usable version was provided for '{product}' — a keyword-only "
+                    "search with no version matches CVEs across that product's entire "
+                    "history, unrelated to what's actually running on this target. A "
+                    "placeholder such as 'unknown' or 'n/a' does not count as a version "
+                    "and will not unlock this lookup. Do NOT retry with a guessed "
+                    "version: if the scan did not reveal one, report the version as "
+                    "unknown and move on."
                 ),
             }
 
@@ -462,21 +589,23 @@ class SecurityTools:
         # NVD's keywordSearch requires *every* token to appear in the CVE text.
         # "openssh 8.0" therefore matched nothing, so any versioned lookup
         # silently returned zero CVEs and every service was rated "low".
-        # Query by CPE when a version is known, and fall back to a keyword
-        # search on the product alone. The vendor is resolved dynamically
+        # Query by CPE first (a version is always present past the guard
+        # above), falling back to a keyword search on the product alone if
+        # the CPE match misses. Both CPE components are resolved dynamically
         # against NVD's own CPE dictionary (throttled + cached) rather than
-        # guessed from a small static table.
-        attempts = []
-        if version:
-            vendor = self._resolve_cpe_vendor(product)
-            attempts.append(("cpe", {"virtualMatchString": _cpe_for(vendor, product, version)}))
-        attempts.append(("keyword", {"keywordSearch": product}))
+        # guessed — the product half matters as much as the vendor half, e.g.
+        # "Apache httpd" -> apache:http_server.
+        cpe_vendor, cpe_product = self._resolve_cpe(product)
+        attempts = [
+            ("cpe", {"virtualMatchString": _cpe_for(cpe_vendor, cpe_product, version)}),
+            ("keyword", {"keywordSearch": product}),
+        ]
 
         last_error = None
         for strategy, extra in attempts:
             params = {"resultsPerPage": 10, **extra}
             # Throttle immediately before each real call — this loop can make
-            # two (cpe then keyword), and _resolve_cpe_vendor above may have
+            # two (cpe then keyword), and _resolve_cpe above may have
             # made a third; NVD's public rate limit applies across all of them.
             self._throttle_nvd()
             try:
@@ -515,12 +644,19 @@ class SecurityTools:
             combined = list(merged.values())
 
             # Each finding carries a real severity — record it so the dashboard
-            # can summarise measured results.
+            # can summarise measured results. Confidence tracks the match
+            # strategy: an exact CPE version match is "likely", the looser
+            # keyword fallback (no exact CPE hit, or no version to match on)
+            # is only "possible" — collapsing the two into one confidence
+            # would overstate how sure a keyword-only hit actually is.
+            match_confidence = "likely" if strategy == "cpe" else "possible"
             for finding in combined:
                 self.record_finding(
                     severity=finding.get("severity", ""),
                     source=f"{product} {version}".strip(),
                     reference=finding.get("id", ""),
+                    confidence=match_confidence,
+                    description=finding.get("description", "")[:300],
                 )
 
             result = {
@@ -558,7 +694,8 @@ class SecurityTools:
         # let a missing nmap scan quietly read as a clean bill of health.
         if status == "success":
             risk_level = "low"
-            if cve_data.get("cve_count", 0) > 0:
+            cve_count = cve_data.get("cve_count", 0)
+            if cve_count > 0:
                 avg_score = sum([c.get("score", 0) for c in cve_data.get("cves", [])]) / max(1, len(cve_data.get("cves", [])))
                 if avg_score >= 9:
                     risk_level = "critical"
@@ -566,14 +703,24 @@ class SecurityTools:
                     risk_level = "high"
                 elif avg_score >= 4:
                     risk_level = "medium"
+                # A real CPE version match is a solid basis for a CVE finding;
+                # the keyword fallback is a much looser text search and
+                # shouldn't be reported with the same confidence.
+                confidence = "likely" if cve_data.get("match_strategy") == "cpe" else "possible"
+            else:
+                # A real, specific check ran and found nothing — that's a
+                # confident "clean", not the same as never having checked.
+                confidence = "high"
         else:
             risk_level = "unknown"
+            confidence = "insufficient_data" if status == "insufficient_data" else "unknown"
 
         return {
             "port": port,
             "service": service,
             "version": version,
             "risk_level": risk_level,
+            "confidence": confidence,
             "cve_data": cve_data
         }
 
@@ -696,6 +843,9 @@ class SecurityTools:
                 continue
 
         if findings:
+            # Upgrade the passive finding this CVE came from (if any) to
+            # "confirmed" — real observed behaviour outranks a version match.
+            self.mark_confirmed(cve_id)
             return {
                 "status": "confirmed",
                 "cve_id": cve_id,
@@ -723,15 +873,33 @@ def run_nmap_scan(target: str) -> str:
     return json.dumps(result, indent=2)
 
 @tool("CVE Lookup")
-def lookup_cves(product: str) -> str:
-    """Look up known CVEs (Common Vulnerabilities and Exposures) for a product."""
-    result = security_tools.lookup_cve(product)
+def lookup_cves(product: str, version: str = "") -> str:
+    """Look up known CVEs (Common Vulnerabilities and Exposures) for a product.
+
+    ALWAYS pass the exact version string the scan reported, as a separate
+    `version` argument — e.g. product="Apache httpd", version="2.4.7".
+    Without a version this returns status "insufficient_data" and no CVEs,
+    because a version-less search matches that product's entire CVE history
+    rather than what is actually running on this target.
+
+    If the scan did not reveal a version, do NOT call this tool at all, and
+    do NOT pass a placeholder like "unknown", "n/a" or a guessed number —
+    placeholders are rejected the same as no version. Simply report that the
+    version could not be determined.
+    """
+    result = security_tools.lookup_cve(product, version)
     return json.dumps(result, indent=2)
 
 @tool("Assess Service Vulnerability")
-def assess_service(port: str, service: str) -> str:
-    """Assess vulnerability risk level of a service running on a specific port."""
-    result = security_tools.assess_vulnerability(port, service)
+def assess_service(port: str, service: str, version: str = "") -> str:
+    """Assess vulnerability risk level of a service running on a specific port.
+
+    ALWAYS pass the exact version string the scan reported, as a separate
+    `version` argument — e.g. service="Apache httpd", version="2.4.7".
+    Without one the assessment can only come back "unknown", since no
+    version-specific CVE correlation is possible.
+    """
+    result = security_tools.assess_vulnerability(port, service, version)
     return json.dumps(result, indent=2)
 
 @tool("Actively Verify CVE")
@@ -752,6 +920,36 @@ def verify_cve_actively(target: str, cve_id: str) -> str:
     """
     result = security_tools.verify_with_nuclei(target, cve_id)
     return json.dumps(result, indent=2)
+
+
+@tool("Get Measured Findings")
+def get_measured_findings() -> str:
+    """The authoritative, machine-recorded list of every CVE this scan actually
+    matched, with its severity and confidence.
+
+    These are recorded directly from NVD/OSV responses during CVE lookups —
+    they are not written or summarised by any agent. This is the ONLY valid
+    source of CVEs for a report.
+
+    Any CVE not in this list did not come from this scan. Do not add CVEs from
+    your own knowledge of what a service "typically" suffers from, however
+    plausible: a version that was never fingerprinted cannot be known to be
+    vulnerable. If this list is empty, the correct report says no CVEs could
+    be confirmed for this target and explains why — it does not fall back to
+    generic, well-known vulnerabilities.
+    """
+    findings = security_tools.get_findings()
+    return json.dumps(
+        {
+            "count": len(findings),
+            "findings": findings,
+            "note": (
+                "Authoritative machine-recorded findings. A CVE absent from this "
+                "list was not matched by this scan and must not appear in the report."
+            ),
+        },
+        indent=2,
+    )
 
 
 class DevTools:

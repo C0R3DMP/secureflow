@@ -96,6 +96,37 @@ def test_session_has_timestamps(history):
     assert s["completed_at"] is not None
 
 
+def test_record_and_retrieve_findings(history):
+    findings = [{"severity": "critical", "source": "openssh 8.0", "reference": "CVE-1", "confidence": "likely"}]
+    history.record("security", "host-a", "success", findings=findings)
+
+    latest = history.get_latest_for_target("host-a")
+    assert latest is not None
+    assert latest["findings"] == findings
+
+
+def test_get_latest_for_target_none_when_never_scanned(history):
+    assert history.get_latest_for_target("never-scanned.example") is None
+
+
+def test_get_latest_for_target_returns_the_most_recent_scan(history):
+    history.record("security", "host-a", "success", findings=[{"reference": "CVE-OLD", "severity": "low", "source": "s", "confidence": "likely"}])
+    history.record("security", "host-a", "success", findings=[{"reference": "CVE-NEW", "severity": "high", "source": "s", "confidence": "likely"}])
+
+    latest = history.get_latest_for_target("host-a")
+    assert latest["findings"][0]["reference"] == "CVE-NEW"
+
+
+def test_get_latest_for_target_respects_session_type(history):
+    history.record("dev", "same-name", "success", findings=[{"reference": "CVE-1", "severity": "low", "source": "s", "confidence": "likely"}])
+    assert history.get_latest_for_target("same-name", session_type="security") is None
+
+
+def test_findings_default_to_empty_list_when_omitted(history):
+    history.record("security", "host-a", "success")
+    assert history.get_latest_for_target("host-a")["findings"] == []
+
+
 def test_import_history_module():
     from secureflow.crew import history
     assert hasattr(history, "SessionHistory")

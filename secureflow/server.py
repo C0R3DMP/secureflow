@@ -512,8 +512,8 @@ async def export_report(request: Request):
 
     if not target:
         return JSONResponse(status_code=400, content={"error": "target param required"})
-    if fmt not in ("html", "pdf", "json"):
-        return JSONResponse(status_code=400, content={"error": "format must be html, pdf, or json"})
+    if fmt not in ("html", "pdf", "json", "sarif"):
+        return JSONResponse(status_code=400, content={"error": "format must be html, pdf, json, or sarif"})
 
     try:
         target = validate_target(target)
@@ -532,14 +532,22 @@ async def export_report(request: Request):
             content={"error": "no report found for target", "target": target},
         )
 
-    # Build a minimal result dict so ReportExporter can work
+    # Build a minimal result dict so ReportExporter can work. The prose report
+    # only exists as a saved HTML file, but structured findings are persisted
+    # separately in SessionHistory (recorded by the orchestrator at scan
+    # completion) — pull those in too so a JSON/SARIF export of a *past* scan
+    # isn't limited to the live-scan-only fields the exporter also accepts.
+    from secureflow.crew.history import SessionHistory
+
     report_html = html_path.read_text(encoding="utf-8")
+    session = SessionHistory().get_latest_for_target(target, session_type="security")
     result = {
         "success": bool(report_html),
         "result": report_html,
         "report_html": report_html,
         "report_path": str(html_path),
         "session_log": "",
+        "findings": session["findings"] if session else [],
     }
 
     try:
@@ -549,7 +557,12 @@ async def export_report(request: Request):
         logger.error(f"Export failed: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-    media_types = {"html": "text/html", "pdf": "application/pdf", "json": "application/json"}
+    media_types = {
+        "html": "text/html",
+        "pdf": "application/pdf",
+        "json": "application/json",
+        "sarif": "application/sarif+json",
+    }
     return FileResponse(
         path=out_path,
         media_type=media_types[fmt],
