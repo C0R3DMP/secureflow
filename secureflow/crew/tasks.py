@@ -66,6 +66,17 @@ def create_security_tasks(target: str, agents: dict = None):
         - Use: read_context_findings(agent_name="analyst", key="vulnerability_analysis")
         - Or use: get_all_findings(agent_name="recon") or get_all_findings(agent_name="analyst")
 
+        **CRITICAL: every CVE in this report must come from get_measured_findings()**
+        - Call get_measured_findings(). It is the authoritative, machine-recorded
+          list of what this scan actually matched, taken straight from NVD/OSV.
+        - A CVE absent from that list did not come from this scan. Do not include
+          it anywhere — not in the table, not in the summary, not as an example.
+        - Do NOT add vulnerabilities from your own knowledge of what a service
+          "usually" has. If no version was fingerprinted, nothing about that
+          service's vulnerability is known, however familiar the service is.
+        - If the list is empty, report exactly that: no CVEs could be confirmed,
+          why, and what recon step would change it. That is a correct report.
+
         Based on reconnaissance and analysis findings from shared context:
 
         1. Read all findings from Recon and Analyst from shared context

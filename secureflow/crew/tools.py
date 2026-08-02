@@ -922,6 +922,36 @@ def verify_cve_actively(target: str, cve_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
+@tool("Get Measured Findings")
+def get_measured_findings() -> str:
+    """The authoritative, machine-recorded list of every CVE this scan actually
+    matched, with its severity and confidence.
+
+    These are recorded directly from NVD/OSV responses during CVE lookups —
+    they are not written or summarised by any agent. This is the ONLY valid
+    source of CVEs for a report.
+
+    Any CVE not in this list did not come from this scan. Do not add CVEs from
+    your own knowledge of what a service "typically" suffers from, however
+    plausible: a version that was never fingerprinted cannot be known to be
+    vulnerable. If this list is empty, the correct report says no CVEs could
+    be confirmed for this target and explains why — it does not fall back to
+    generic, well-known vulnerabilities.
+    """
+    findings = security_tools.get_findings()
+    return json.dumps(
+        {
+            "count": len(findings),
+            "findings": findings,
+            "note": (
+                "Authoritative machine-recorded findings. A CVE absent from this "
+                "list was not matched by this scan and must not appear in the report."
+            ),
+        },
+        indent=2,
+    )
+
+
 class DevTools:
     """Development tools for architecture, code generation, and review."""
 

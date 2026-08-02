@@ -1355,3 +1355,62 @@ def test_osv_keeps_records_whose_own_id_is_a_cve(monkeypatch):
     monkeypatch.setattr(tools_mod.requests, "post", lambda *a, **k: _Resp())
 
     assert [f["id"] for f in tools_mod._osv_lookup("nginx", "1.18.0")] == ["CVE-2021-3618"]
+
+
+# ---------------------------------------------------------------------------
+# The report must be grounded in measured findings, not the model's knowledge.
+#
+# Live-verified: a run that recorded ZERO findings (the service could not be
+# fingerprinted, so every lookup correctly returned insufficient_data) still
+# produced a report whose prose "flags five potential vulnerabilities",
+# including Heartbleed at CVSS 7.5. The tool layer had stopped fabricating;
+# the reporter agent was writing well-known CVEs in from its own knowledge.
+# ---------------------------------------------------------------------------
+
+def test_get_measured_findings_reports_the_recorded_findings():
+    import secureflow.crew.tools as tools_mod
+
+    tools_mod.security_tools.clear_findings()
+    tools_mod.security_tools.record_finding(
+        "high", "Apache httpd 2.4.7", "CVE-2014-0098", confidence="likely")
+
+    payload = json.loads(tools_mod.get_measured_findings.run())
+
+    assert payload["count"] == 1
+    assert payload["findings"][0]["reference"] == "CVE-2014-0098"
+    tools_mod.security_tools.clear_findings()
+
+
+def test_get_measured_findings_is_explicit_when_empty():
+    """An empty list is the case that invites fabrication, so the tool has to
+    say outright that anything absent from it must not be reported."""
+    import secureflow.crew.tools as tools_mod
+
+    tools_mod.security_tools.clear_findings()
+    payload = json.loads(tools_mod.get_measured_findings.run())
+
+    assert payload["count"] == 0
+    assert payload["findings"] == []
+    assert "must not appear" in payload["note"]
+
+
+def test_reporter_is_told_to_ground_every_cve_in_measured_findings():
+    from secureflow.crew.agents import CrewAgents
+    from secureflow.crew.tools import get_measured_findings
+
+    reporter = CrewAgents.create_reporter_agent()
+
+    assert any(t.name == get_measured_findings.name for t in reporter.tools), \
+        "reporter has no access to the authoritative findings list"
+    backstory = reporter.backstory.lower()
+    assert "must not appear" in backstory
+    assert "heartbleed" in backstory, "the instruction should name the failure it saw"
+
+
+def test_reporting_task_forbids_cves_not_in_measured_findings():
+    from secureflow.crew.tasks import create_security_tasks
+
+    description = create_security_tasks("example.com")["reporting"].description.lower()
+
+    assert "get_measured_findings" in description
+    assert "did not come from this scan" in description

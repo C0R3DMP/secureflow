@@ -2,7 +2,7 @@ from crewai import Agent, LLM
 from secureflow.crew.tools import (
     run_nmap_scan, lookup_cves, assess_service, verify_cve_actively,
     save_findings_to_context, read_context_findings,
-    get_all_findings, get_latest_findings
+    get_all_findings, get_latest_findings, get_measured_findings
 )
 from secureflow.config import get_best_available_llm
 import os
@@ -125,6 +125,19 @@ class CrewAgents:
                 "1. Read ALL findings from context:\n"
                 "   - read_context_findings(agent_name='recon', key='scan_results')\n"
                 "   - read_context_findings(agent_name='analyst', key='vulnerability_analysis')\n"
+                "   - get_measured_findings() — the AUTHORITATIVE machine-recorded list of "
+                "every CVE this scan actually matched. Call it, and treat it as the only "
+                "valid source of CVEs. A CVE that is not in that list did not come from "
+                "this scan and MUST NOT appear anywhere in your report — not in the "
+                "findings table, not in the executive summary, not as an example. Never "
+                "add well-known vulnerabilities a service 'typically' has (Heartbleed, "
+                "POODLE, Shellshock and the like) from your own knowledge: a version that "
+                "was never fingerprinted cannot be known to be vulnerable, and inventing "
+                "one is the single worst failure this report can contain.\n"
+                "   - If that list is empty, say so plainly: state that no CVEs could be "
+                "confirmed, explain why (typically no version was fingerprinted), and "
+                "recommend the recon step needed to change that. An honest 'could not "
+                "determine' is a correct report; a fabricated finding is not.\n"
                 "2. Executive Summary (1 page, non-technical):\n"
                 "   - Risk posture, top findings, business impact, timeline\n"
                 "3. Detailed Findings Table:\n"
@@ -142,7 +155,7 @@ class CrewAgents:
                 "6. Save report: save_findings_to_context key='final_report'\n"
                 "\nWrite reports that get funded and implemented. This may be presented to the board."
             ),
-            tools=[read_context_findings, get_all_findings, get_latest_findings, save_findings_to_context],
+            tools=[read_context_findings, get_all_findings, get_latest_findings, get_measured_findings, save_findings_to_context],
             verbose=True,
             max_iter=4,
             allow_delegation=False,

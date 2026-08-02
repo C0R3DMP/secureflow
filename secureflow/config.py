@@ -128,18 +128,26 @@ class LLMProviderStatus:
             # confirmed live against OpenRouter's own /models list and a real
             # completion call at the same time.
             #
-            # Chosen specifically for tool-call behaviour. CrewAI rejects a
-            # response whose text content is empty with "Invalid response from
-            # LLM call - None or empty", even when it carries a perfectly valid
-            # tool call. Measured over 4 trials each with a real tool schema:
-            # openai/gpt-oss-20b:free returned empty content on 4/4 tool-call
-            # turns, and nvidia/nemotron-3-nano-30b-a3b:free did the same;
-            # inclusionai/ling-3.0-flash:free emitted text alongside the tool
-            # call on 4/4. All three produced a correct call, so this is purely
-            # about surviving CrewAI's own emptiness check. It also carries a
-            # 262k context against gpt-oss-20b's 131k, which the crew's long
-            # tool-schema prompts benefit from.
-            "model": "openrouter/inclusionai/ling-3.0-flash:free",
+            # Kept deliberately, on the evidence of real crew runs rather than
+            # isolated probes.
+            #
+            # This model has one known wart: CrewAI rejects a response whose
+            # text content is empty ("Invalid response from LLM call - None or
+            # empty") even when it carries a valid tool call, and measured over
+            # 4 trials with a real tool schema this model returns empty content
+            # on 4/4 tool-call turns. That looked worth switching away from —
+            # inclusionai/ling-3.0-flash:free emitted text alongside the call
+            # on 4/4 of the same probe.
+            #
+            # The switch was tried and reverted. In an actual crew run
+            # ling-3.0-flash produced 23 "invalid request error" 400s from its
+            # upstream provider and failed the scan outright, while this model
+            # completed 4/4 full runs — CrewAI retries through the empty-content
+            # warnings, so they are noisy but non-fatal. The isolated probe was
+            # simply not predictive of the request shape CrewAI actually sends.
+            # Re-benchmark against a real run, not a one-shot call, before
+            # changing this again.
+            "model": "openrouter/openai/gpt-oss-20b:free",
             "base_url": "https://openrouter.ai/api/v1",
         },
         "ollama": {
@@ -207,7 +215,7 @@ def get_fallback_chain():
         chain.append({"model": "gemini/gemini-2.5-flash", "api_key": GEMINI_API_KEY})
     if OPENROUTER_API_KEY:
         chain.append({
-            "model": "openrouter/inclusionai/ling-3.0-flash:free",
+            "model": "openrouter/openai/gpt-oss-20b:free",
             "api_key": OPENROUTER_API_KEY,
             "base_url": "https://openrouter.ai/api/v1",
         })
@@ -552,7 +560,7 @@ def get_best_available_llm(temperature=0.7):
                     # reason for longer. An explicit, generous ceiling is what
                     # actually leaves room for the answer after the reasoning.
                     return _instrument_quota(LLM(
-                        model="openrouter/inclusionai/ling-3.0-flash:free",
+                        model="openrouter/openai/gpt-oss-20b:free",
                         api_key=OPENROUTER_API_KEY,
                         base_url="https://openrouter.ai/api/v1",
                         temperature=temperature,
