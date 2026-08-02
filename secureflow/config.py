@@ -451,6 +451,46 @@ def get_llm_with_rate_limit_fallback(model="gemini/gemini-2.5-flash", temperatur
 # These functions execute CLI tools via subprocess and are not CrewAI-compatible
 
 
+def _instrument_quota(llm, provider):
+    """Count every crew LLM request against `provider`'s tracked budget.
+
+    Without this the quota panel only ever reflected Gemini (instrumented
+    inside RateLimitAwareGeminiLLM) and the chat endpoint — live-verified, a
+    full scan running on OpenRouter left the dashboard reading "0 used today"
+    for the one provider actually doing the work.
+
+    The wrapping is done on the instance rather than via a subclass because
+    CrewAI's LLM.__new__ returns a different concrete class per provider
+    (OpenRouter resolves to OpenAICompatibleCompletion), and those classes
+    re-validate their provider from the defining class at construction time,
+    so a subclass of them cannot even be instantiated. Any failure to
+    instrument is swallowed: budget telemetry must never stop a scan.
+    """
+    from secureflow import quota
+
+    try:
+        original = llm.call
+    except AttributeError:
+        return llm
+
+    def _counted(*args, **kwargs):
+        quota.record_attempt(provider)
+        try:
+            return original(*args, **kwargs)
+        except Exception as exc:
+            text = str(exc)
+            lowered = text.lower()
+            if "429" in lowered or "quota" in lowered or "rate limit" in lowered or "rate_limit" in lowered:
+                quota.record_quota_exhausted(provider, text)
+            raise
+
+    try:
+        llm.call = _counted
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(f"Could not instrument {provider} quota tracking: {exc}")
+    return llm
+
+
 def get_best_available_llm(temperature=0.7):
     """Get the best available LLM based on provider priority.
 
@@ -499,28 +539,28 @@ def get_best_available_llm(temperature=0.7):
                     # (full tool schemas + accumulated context) makes the model
                     # reason for longer. An explicit, generous ceiling is what
                     # actually leaves room for the answer after the reasoning.
-                    return LLM(
+                    return _instrument_quota(LLM(
                         model="openrouter/openai/gpt-oss-20b:free",
                         api_key=OPENROUTER_API_KEY,
                         base_url="https://openrouter.ai/api/v1",
                         temperature=temperature,
                         max_tokens=8192,
-                    )
+                    ), "openrouter")
             elif provider == "ollama":
                 logger.info(f"✅ Using Ollama (local, free)")
-                return LLM(
+                return _instrument_quota(LLM(
                     model="ollama/qwen2.5-coder:7b",
                     base_url=OLLAMA_BASE_URL,
                     temperature=temperature,
-                )
+                ), "ollama")
             elif provider == "claude":
                 if ANTHROPIC_API_KEY:
                     logger.info(f"✅ Using Claude API")
-                    return LLM(
+                    return _instrument_quota(LLM(
                         model="claude-opus-4-6",
                         api_key=ANTHROPIC_API_KEY,
                         temperature=temperature,
-                    )
+                    ), "anthropic")
         except Exception as e:
             logger.warning(f"Provider {provider} reported available but failed to initialize: {e}")
             continue

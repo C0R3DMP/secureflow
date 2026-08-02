@@ -210,3 +210,75 @@ def test_providers_endpoint_includes_quota_snapshot(monkeypatch):
     assert result["gemini"]["quota"]["estimate"] is True
     # The claude/anthropic key-naming bridge must actually work.
     assert "quota" in result["claude"]
+
+
+# ---------------------------------------------------------------------------
+# The crew's own LLM calls must be counted, not just Gemini and chat.
+#
+# Live-verified gap: quota was instrumented only inside
+# RateLimitAwareGeminiLLM and chat.stream_reply(), so a full scan running on
+# OpenRouter left the dashboard reading "0 used today" for the one provider
+# actually doing the work.
+# ---------------------------------------------------------------------------
+
+def test_instrument_quota_counts_calls_on_any_provider_class():
+    from secureflow import config as config_mod
+    from secureflow import quota as quota_mod
+
+    class _FakeProviderLLM:
+        """Stands in for whichever concrete class CrewAI returns."""
+
+        def call(self, *a, **k):
+            return "ok"
+
+    llm = config_mod._instrument_quota(_FakeProviderLLM(), "openrouter")
+
+    assert llm.call("hi") == "ok"
+    assert llm.call("hi again") == "ok"
+    assert quota_mod.snapshot("openrouter")["attempts_today"] == 2
+
+
+def test_instrument_quota_records_exhaustion_and_reraises():
+    from secureflow import config as config_mod
+    from secureflow import quota as quota_mod
+
+    class _RateLimited:
+        def call(self, *a, **k):
+            raise RuntimeError("429 Too Many Requests: quota exceeded")
+
+    llm = config_mod._instrument_quota(_RateLimited(), "openrouter")
+
+    with pytest.raises(RuntimeError):
+        llm.call("hi")
+
+    snapshot = quota_mod.snapshot("openrouter")
+    assert snapshot["attempts_today"] == 1
+    assert snapshot["exhausted_at"] is not None
+
+
+def test_instrument_quota_never_breaks_a_scan():
+    """Budget telemetry is strictly best-effort — an LLM object that refuses
+    instrumentation must still be returned and usable."""
+    from secureflow import config as config_mod
+
+    class _Frozen:
+        def call(self, *a, **k):
+            return "ok"
+
+        def __setattr__(self, name, value):
+            raise AttributeError("read-only")
+
+    llm = config_mod._instrument_quota(_Frozen(), "openrouter")
+    assert llm.call("hi") == "ok"
+
+
+def test_instrument_quota_does_not_double_count_gemini():
+    """Gemini is instrumented inside RateLimitAwareGeminiLLM.call() already;
+    the generic wrapper must not also be applied to it."""
+    import inspect
+
+    from secureflow import config as config_mod
+
+    source = inspect.getsource(config_mod.get_best_available_llm)
+    gemini_branch = source.split('provider == "gemini"')[1].split("elif")[0]
+    assert "_instrument_quota" not in gemini_branch
