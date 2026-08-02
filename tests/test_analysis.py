@@ -884,7 +884,7 @@ def test_lookup_cve_refuses_bare_protocol_label_without_version():
     assert result["status"] == "insufficient_data"
     assert result["cve_count"] == 0
     assert result["cves"] == []
-    assert "nmap" in result["message"]
+    assert "version" in result["message"].lower()
 
 
 def test_lookup_cve_refuses_every_generic_service_label(monkeypatch):
@@ -1244,3 +1244,66 @@ def test_verify_with_nuclei_times_out_gracefully(monkeypatch):
 
     result = tools_mod.SecurityTools().verify_with_nuclei("example.com", "CVE-2021-41773")
     assert result["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# A placeholder version must not unlock the lookup.
+#
+# Live-verified: with the version argument added to the tool, the recon agent
+# called lookup_cves(product="Apache httpd", version="unknown") for a service
+# nmap had explicitly reported as unrecognised. "unknown" is truthy, so it
+# sailed past the empty-version guard, fell through to the whole-history
+# keyword search, and returned CVE-1999-0236 / CVE-1999-0071 — 1999-era
+# Apache CVEs — as findings for that target.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "placeholder", ["unknown", "Unknown", "n/a", "N/A", "none", "unspecified", "latest", "-", "?", ""]
+)
+def test_lookup_cve_rejects_placeholder_versions(placeholder, monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    def _boom(*a, **k):
+        raise AssertionError(f"must not query the network for version={placeholder!r}")
+
+    monkeypatch.setattr(tools_mod.requests, "get", _boom)
+    monkeypatch.setattr(tools_mod.requests, "post", _boom)
+
+    result = tools_mod.SecurityTools().lookup_cve("Apache httpd", placeholder)
+
+    assert result["status"] == "insufficient_data", placeholder
+    assert result["cve_count"] == 0
+
+
+@pytest.mark.parametrize("version", ["2.4.7", "8.0p1", "1.18.0", "10", "5.7.44-log"])
+def test_lookup_cve_accepts_real_versions(version, monkeypatch):
+    """The digit rule must not swallow genuine release identifiers."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulnerabilities": [], "totalResults": 0}
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        tools_mod.SecurityTools, "_resolve_cpe", lambda self, p: ("vendor", "product"))
+
+    result = tools_mod.SecurityTools().lookup_cve("some-product", version)
+    assert result["status"] == "success", version
+
+
+def test_insufficient_data_message_tells_the_model_not_to_guess():
+    """The message is the model's only feedback channel — if it doesn't say
+    'don't retry with a guess', the model retries with a guess."""
+    from secureflow.crew.tools import SecurityTools
+
+    message = SecurityTools().lookup_cve("Apache httpd", "unknown")["message"]
+    lowered = message.lower()
+
+    assert "placeholder" in lowered
+    assert "do not retry" in lowered or "do not guess" in lowered

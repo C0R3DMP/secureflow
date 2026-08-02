@@ -83,6 +83,25 @@ def _split_product_version(product: str) -> Any:
     return text, ""
 
 
+def _usable_version(version: str) -> str:
+    """Return the version if it identifies a real release, else "".
+
+    A model asked for a version it does not have will supply a placeholder
+    rather than omit the argument — live-verified, the recon agent called
+    lookup_cves(product="Apache httpd", version="unknown") when nmap had
+    explicitly reported the service as unrecognised. "unknown" is a truthy
+    string, so it sailed past the empty-version guard and reopened exactly
+    the whole-history keyword search that guard exists to prevent, returning
+    1999-era Apache CVEs for a service whose version nobody knew.
+
+    Requiring at least one digit is the check that generalises: every real
+    release identifier has one, and no placeholder a model reaches for
+    ("unknown", "n/a", "unspecified", "latest", "-") does.
+    """
+    text = str(version or "").strip()
+    return text if any(char.isdigit() for char in text) else ""
+
+
 def _normalise_cpe_component(value: str) -> str:
     return re.sub(r"[^a-z0-9_.-]", "_", str(value).strip().lower())
 
@@ -523,6 +542,9 @@ class SecurityTools:
         # that actually generalises is refusing *any* unversioned lookup,
         # invented product name or not.
         #
+        # A placeholder like "unknown" is not a version — see _usable_version.
+        version = _usable_version(version)
+
         # Before refusing, recover a version the caller crammed onto the
         # product name ("Apache httpd 2.4.7") — live-verified real model
         # behaviour, and refusing that would throw away a version we actually
@@ -538,11 +560,13 @@ class SecurityTools:
                 "cve_count": 0,
                 "cves": [],
                 "message": (
-                    f"No version was provided for '{product}' — a keyword-only search "
-                    "with no version matches CVEs across that product's entire history, "
-                    "unrelated to what's actually running on this target. Fingerprint "
-                    "the exact version (e.g. via nmap -sV) before correlating CVEs for "
-                    "this service."
+                    f"No usable version was provided for '{product}' — a keyword-only "
+                    "search with no version matches CVEs across that product's entire "
+                    "history, unrelated to what's actually running on this target. A "
+                    "placeholder such as 'unknown' or 'n/a' does not count as a version "
+                    "and will not unlock this lookup. Do NOT retry with a guessed "
+                    "version: if the scan did not reveal one, report the version as "
+                    "unknown and move on."
                 ),
             }
 
@@ -844,8 +868,12 @@ def lookup_cves(product: str, version: str = "") -> str:
     `version` argument — e.g. product="Apache httpd", version="2.4.7".
     Without a version this returns status "insufficient_data" and no CVEs,
     because a version-less search matches that product's entire CVE history
-    rather than what is actually running on this target. If the scan did not
-    reveal a version, report that it is unknown rather than guessing one.
+    rather than what is actually running on this target.
+
+    If the scan did not reveal a version, do NOT call this tool at all, and
+    do NOT pass a placeholder like "unknown", "n/a" or a guessed number —
+    placeholders are rejected the same as no version. Simply report that the
+    version could not be determined.
     """
     result = security_tools.lookup_cve(product, version)
     return json.dumps(result, indent=2)
