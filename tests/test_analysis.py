@@ -1307,3 +1307,51 @@ def test_insufficient_data_message_tells_the_model_not_to_guess():
 
     assert "placeholder" in lowered
     assert "do not retry" in lowered or "do not guess" in lowered
+
+
+# ---------------------------------------------------------------------------
+# OSV without an ecosystem returns distro advisories, not just CVEs.
+#
+# Live-verified: nginx 1.18.0 returns 417 OSV records of which only 22 carry a
+# CVE alias — the rest are RHSA/DSA/USN/ALPINE/SUSE packaging advisories for
+# individual distro builds. vsftpd 2.3.4 returns 42 records and none are CVEs.
+# Recording those as findings inflated a scan's CVE count by an order of
+# magnitude with entries that say nothing about the target's own software.
+# ---------------------------------------------------------------------------
+
+def test_osv_drops_distro_advisories_without_a_cve_alias(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulns": [
+                {"id": "RHSA-2021:1834", "summary": "distro rebuild", "aliases": []},
+                {"id": "USN-5000-1", "summary": "ubuntu advisory"},
+                {"id": "ALPINE-CVE-2021-23017", "summary": "alpine", "aliases": []},
+                {"id": "GHSA-abcd", "summary": "real one", "aliases": ["CVE-2021-23017"]},
+            ]}
+
+    monkeypatch.setattr(tools_mod.requests, "post", lambda *a, **k: _Resp())
+
+    findings = tools_mod._osv_lookup("nginx", "1.18.0")
+
+    assert [f["id"] for f in findings] == ["CVE-2021-23017"]
+
+
+def test_osv_keeps_records_whose_own_id_is_a_cve(monkeypatch):
+    """Some OSV records are keyed directly on the CVE id, with no aliases."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulns": [{"id": "CVE-2021-3618", "summary": "direct", "aliases": []}]}
+
+    monkeypatch.setattr(tools_mod.requests, "post", lambda *a, **k: _Resp())
+
+    assert [f["id"] for f in tools_mod._osv_lookup("nginx", "1.18.0")] == ["CVE-2021-3618"]

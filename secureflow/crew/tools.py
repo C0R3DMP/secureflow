@@ -139,9 +139,21 @@ def _osv_lookup(product: str, version: str, timeout: int = 10) -> List[Dict[str,
 
     findings = []
     for vuln in vulns:
-        # Prefer the aliased CVE id so results dedupe against the NVD set.
-        aliases = vuln.get("aliases") or []
-        identifier = next((a for a in aliases if a.startswith("CVE-")), vuln.get("id", ""))
+        # Keep only records that carry a real CVE id, and use it so results
+        # dedupe against the NVD set.
+        #
+        # A query with no ecosystem — which is all we can send, since a service
+        # banner doesn't name one — matches distro *advisories* far more often
+        # than CVEs. Live-verified: nginx 1.18.0 returns 417 OSV records, of
+        # which only 22 carry a CVE alias; the other 395 are RHSA/DSA/USN/
+        # ALPINE/SUSE packaging advisories, each for one distro's own build.
+        # vsftpd 2.3.4 returns 42 records and *none* are CVEs. Recording those
+        # as findings inflated a scan's CVE count by an order of magnitude with
+        # entries that say nothing about the target's actual software.
+        candidates = [vuln.get("id", "")] + list(vuln.get("aliases") or [])
+        identifier = next((c for c in candidates if c.startswith("CVE-")), "")
+        if not identifier:
+            continue
         severity = _osv_severity(vuln)
         findings.append({
             "id": identifier,
