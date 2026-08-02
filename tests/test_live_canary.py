@@ -73,7 +73,7 @@ def test_cpe_vendor_resolves_dynamically_against_nvd():
     from secureflow.crew.tools import SecurityTools
 
     tools = SecurityTools()
-    assert tools._resolve_cpe_vendor("vsftpd") == "vsftpd_project"
+    assert tools._resolve_cpe("vsftpd") == ("vsftpd_project", "vsftpd")
 
 
 def test_full_recon_to_cve_pipeline_against_a_real_target():

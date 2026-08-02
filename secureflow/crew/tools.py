@@ -47,6 +47,42 @@ _CPE_VENDORS = {
 }
 
 
+# Service-banner names that don't appear verbatim in NVD's CPE titles, so a
+# keyword search on them returns nothing at all. Verified live: nmap reports
+# Apache's banner as "Apache httpd", but NVD titles it "Apache HTTP Server" —
+# the token "httpd" appears nowhere, so keywordSearch=apache httpd -> 0
+# results while the aliased query resolves correctly to apache:http_server.
+_CPE_QUERY_ALIASES = {
+    "apache httpd": "apache http server",
+    "httpd": "apache http server",
+    "apache2": "apache http server",
+    "apache": "apache http server",
+}
+
+# A trailing version token crammed onto the product name — "Apache httpd
+# 2.4.7". Must start with a digit (optionally 'v') so descriptive trailing
+# words like the "Server" in "Apache HTTP Server" are never mistaken for one.
+_TRAILING_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*[a-z0-9._-]*$", re.IGNORECASE)
+
+
+def _split_product_version(product: str) -> Any:
+    """Split a trailing version off a product string: ("Apache httpd 2.4.7")
+    -> ("Apache httpd", "2.4.7"). Returns (product, "") when there is none.
+
+    Live-verified need: the crew's own recon agent, given a tool with no
+    version parameter, put the version it had correctly fingerprinted into
+    the product name instead. The tool signature is fixed too, but a model
+    can always phrase it this way, so the parsing is kept as a safety net.
+    """
+    text = str(product or "").strip()
+    if " " not in text:
+        return text, ""
+    head, _, tail = text.rpartition(" ")
+    if _TRAILING_VERSION_RE.match(tail):
+        return head.strip(), tail
+    return text, ""
+
+
 def _normalise_cpe_component(value: str) -> str:
     return re.sub(r"[^a-z0-9_.-]", "_", str(value).strip().lower())
 
@@ -197,42 +233,52 @@ class SecurityTools:
             time.sleep(remaining)
         self.last_api_call = time.time()
 
-    def _resolve_cpe_vendor(self, product: str) -> str:
-        """Resolve a product name to its NVD CPE vendor tag dynamically.
+    def _resolve_cpe(self, product: str) -> Any:
+        """Resolve a product name to its NVD (vendor, product) CPE components.
 
-        The ~15-entry hardcoded table this replaced was flatly wrong for
-        several common products (verified directly against NVD's own CPE
-        dictionary: mysql, nginx, vsftpd, redis) because it was never checked
-        against real data. Querying the dictionary itself is authoritative and
-        covers products the table never anticipated; the static table now only
-        serves as an offline fallback when NVD is unreachable.
+        Both halves have to be resolved, not just the vendor: NVD's CPE
+        *product* field frequently differs from the name a scanner reports.
+        Live-verified against a real crew run — nmap fingerprinted
+        "Apache httpd 2.4.7" (the genuine banner on scanme.nmap.org), whose
+        real CPE is `apache:http_server`, matching 108 real CVEs. Keeping the
+        caller's own string as the product built `apache_httpd:apache_httpd`,
+        which matches nothing, so a correct, versioned lookup still found zero.
 
-        A naive "trust the first keyword hit" approach is unreliable —
-        keywordSearch is full-text and its top hit can be an unrelated product
-        (verified: "php" surfaced an Adobe product first, "redis" an AT&T
-        one). Filtering to results whose CPE *product* field exactly equals
-        the query, then taking the most common vendor among those, is what
-        actually resolves correctly.
+        The query also has to use the *raw* product string, not the
+        underscore-normalised one: keywordSearch is a natural-language text
+        search, so "apache_httpd" returns 0 results where "apache http server"
+        returns 574. Normalising before querying silently broke every
+        multi-word product name; it only ever worked for single-word ones
+        (nginx, redis, php) where normalisation is a no-op.
+
+        Resolution is layered, because neither strategy alone is right
+        (both verified against NVD directly):
+          1. Prefer results whose CPE product field exactly equals the query —
+             a plain majority vote picks whichever product happens to have the
+             most version rows ("php" resolves to `php:blog_cms` that way).
+          2. Otherwise fall back to the majority (vendor, product) pair, which
+             is what resolves descriptive names like "Apache HTTP Server".
         """
-        normalised = _normalise_cpe_component(product)
-        if normalised in self._cpe_vendor_cache:
-            return self._cpe_vendor_cache[normalised]
+        key = str(product or "").strip().lower()
+        if key in self._cpe_vendor_cache:
+            return self._cpe_vendor_cache[key]
 
-        vendor = self._query_nvd_cpe_dictionary(normalised)
-        if vendor is None:
-            vendor = _CPE_VENDORS.get(normalised, normalised)
+        resolved = self._query_nvd_cpe_dictionary(_CPE_QUERY_ALIASES.get(key, key))
+        if resolved is None:
+            normalised = _normalise_cpe_component(product)
+            resolved = (_CPE_VENDORS.get(normalised, normalised), normalised)
 
-        self._cpe_vendor_cache[normalised] = vendor
-        return vendor
+        self._cpe_vendor_cache[key] = resolved
+        return resolved
 
-    def _query_nvd_cpe_dictionary(self, normalised_product: str) -> Any:
-        """Return the majority-vote vendor for an exact CPE product match, or
-        None if the dictionary is unreachable or has no exact match."""
+    def _query_nvd_cpe_dictionary(self, query: str) -> Any:
+        """Return a resolved (vendor, product) pair, or None if the dictionary
+        is unreachable or returns nothing usable."""
         self._throttle_nvd()
         try:
             response = requests.get(
                 "https://services.nvd.nist.gov/rest/json/cpes/2.0",
-                params={"keywordSearch": normalised_product, "resultsPerPage": 20},
+                params={"keywordSearch": query, "resultsPerPage": 50},
                 timeout=15,
             )
             if response.status_code != 200:
@@ -241,17 +287,24 @@ class SecurityTools:
         except (requests.exceptions.RequestException, ValueError):
             return None
 
-        votes: Dict[str, int] = {}
+        pairs: List[Any] = []
         for item in data.get("products", []):
             cpe_name = (item.get("cpe") or {}).get("cpeName", "")
             parts = cpe_name.split(":")
-            # cpe:2.3:a:<vendor>:<product>:... — index 4 is the product field.
-            if len(parts) > 4 and parts[4] == normalised_product:
-                vendor = parts[3]
-                votes[vendor] = votes.get(vendor, 0) + 1
+            # cpe:2.3:a:<vendor>:<product>:... — indexes 3 and 4.
+            if len(parts) > 4:
+                pairs.append((parts[3], parts[4]))
 
-        if not votes:
+        if not pairs:
             return None
+
+        target = _normalise_cpe_component(query)
+        exact = [pair for pair in pairs if pair[1] == target]
+        candidates = exact or pairs
+
+        votes: Dict[Any, int] = {}
+        for pair in candidates:
+            votes[pair] = votes.get(pair, 0) + 1
         return max(votes.items(), key=lambda kv: kv[1])[0]
 
     def record_finding(
@@ -469,6 +522,14 @@ class SecurityTools:
         # any check keyed on specific known-generic strings; the only thing
         # that actually generalises is refusing *any* unversioned lookup,
         # invented product name or not.
+        #
+        # Before refusing, recover a version the caller crammed onto the
+        # product name ("Apache httpd 2.4.7") — live-verified real model
+        # behaviour, and refusing that would throw away a version we actually
+        # have.
+        if not version:
+            product, version = _split_product_version(product)
+
         if not version:
             return {
                 "status": "insufficient_data",
@@ -494,12 +555,13 @@ class SecurityTools:
         # silently returned zero CVEs and every service was rated "low".
         # Query by CPE first (a version is always present past the guard
         # above), falling back to a keyword search on the product alone if
-        # the CPE match misses. The vendor is resolved dynamically against
-        # NVD's own CPE dictionary (throttled + cached) rather than guessed
-        # from a small static table.
-        vendor = self._resolve_cpe_vendor(product)
+        # the CPE match misses. Both CPE components are resolved dynamically
+        # against NVD's own CPE dictionary (throttled + cached) rather than
+        # guessed — the product half matters as much as the vendor half, e.g.
+        # "Apache httpd" -> apache:http_server.
+        cpe_vendor, cpe_product = self._resolve_cpe(product)
         attempts = [
-            ("cpe", {"virtualMatchString": _cpe_for(vendor, product, version)}),
+            ("cpe", {"virtualMatchString": _cpe_for(cpe_vendor, cpe_product, version)}),
             ("keyword", {"keywordSearch": product}),
         ]
 
@@ -507,7 +569,7 @@ class SecurityTools:
         for strategy, extra in attempts:
             params = {"resultsPerPage": 10, **extra}
             # Throttle immediately before each real call — this loop can make
-            # two (cpe then keyword), and _resolve_cpe_vendor above may have
+            # two (cpe then keyword), and _resolve_cpe above may have
             # made a third; NVD's public rate limit applies across all of them.
             self._throttle_nvd()
             try:
@@ -775,15 +837,29 @@ def run_nmap_scan(target: str) -> str:
     return json.dumps(result, indent=2)
 
 @tool("CVE Lookup")
-def lookup_cves(product: str) -> str:
-    """Look up known CVEs (Common Vulnerabilities and Exposures) for a product."""
-    result = security_tools.lookup_cve(product)
+def lookup_cves(product: str, version: str = "") -> str:
+    """Look up known CVEs (Common Vulnerabilities and Exposures) for a product.
+
+    ALWAYS pass the exact version string the scan reported, as a separate
+    `version` argument — e.g. product="Apache httpd", version="2.4.7".
+    Without a version this returns status "insufficient_data" and no CVEs,
+    because a version-less search matches that product's entire CVE history
+    rather than what is actually running on this target. If the scan did not
+    reveal a version, report that it is unknown rather than guessing one.
+    """
+    result = security_tools.lookup_cve(product, version)
     return json.dumps(result, indent=2)
 
 @tool("Assess Service Vulnerability")
-def assess_service(port: str, service: str) -> str:
-    """Assess vulnerability risk level of a service running on a specific port."""
-    result = security_tools.assess_vulnerability(port, service)
+def assess_service(port: str, service: str, version: str = "") -> str:
+    """Assess vulnerability risk level of a service running on a specific port.
+
+    ALWAYS pass the exact version string the scan reported, as a separate
+    `version` argument — e.g. service="Apache httpd", version="2.4.7".
+    Without one the assessment can only come back "unknown", since no
+    version-specific CVE correlation is possible.
+    """
+    result = security_tools.assess_vulnerability(port, service, version)
     return json.dumps(result, indent=2)
 
 @tool("Actively Verify CVE")

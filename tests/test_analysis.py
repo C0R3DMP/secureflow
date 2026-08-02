@@ -200,7 +200,7 @@ def test_suggestions_empty_for_clean_code():
 # ---------------------------------------------------------------------------
 
 def test_cpe_for_is_pure_string_formatting():
-    """_cpe_for no longer resolves a vendor itself — that's _resolve_cpe_vendor's
+    """_cpe_for no longer resolves a vendor itself — that's _resolve_cpe's
     job now (queried dynamically against NVD). This is just formatting."""
     assert _cpe_for("openbsd", "openssh", "8.0") == "cpe:2.3:a:openbsd:openssh:8.0"
     assert _cpe_for("igor_sysoev", "nginx", "1.18.0") == "cpe:2.3:a:igor_sysoev:nginx:1.18.0"
@@ -233,7 +233,7 @@ def test_versioned_lookup_uses_cpe_not_keyword(monkeypatch):
     # Isolate this test to CVE-search construction — vendor resolution has its
     # own dedicated tests below. Also stub OSV: it calls requests.post, which
     # this test never mocked, so it was silently making a real network call.
-    monkeypatch.setattr(tools_mod.SecurityTools, "_resolve_cpe_vendor", lambda self, p: "openbsd")
+    monkeypatch.setattr(tools_mod.SecurityTools, "_resolve_cpe", lambda self, p: ("openbsd", "openssh"))
     monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
 
     tools_mod.SecurityTools().lookup_cve("openssh", "8.0")
@@ -265,12 +265,11 @@ def _cpe_dict_response(entries):
     }
 
 
-def test_resolve_cpe_vendor_majority_votes_exact_product_matches(monkeypatch):
-    """A naive 'trust the first hit' approach is unreliable — keywordSearch is
-    full-text and its top result can be an unrelated product. Filtering to
-    exact product-field matches and taking the majority vendor is what
-    actually resolves correctly (verified against real NVD data: redis ->
-    pivotal_software, 18/20 exact matches agreeing)."""
+def test_resolve_cpe_prefers_exact_product_matches_over_raw_majority(monkeypatch):
+    """A plain majority vote picks whichever product happens to have the most
+    version rows — verified live against real NVD data, that resolves "php" to
+    php:blog_cms. Preferring results whose product field exactly equals the
+    query is what actually resolves correctly."""
     import secureflow.crew.tools as tools_mod
 
     class _Resp:
@@ -279,18 +278,66 @@ def test_resolve_cpe_vendor_majority_votes_exact_product_matches(monkeypatch):
         @staticmethod
         def json():
             return _cpe_dict_response(
-                [("pivotal_software", "redis")] * 4
-                + [("att", "redis-something-else")] * 3  # different product field
+                [("php", "blog_cms")] * 9  # more rows, but the wrong product
+                + [("php", "php")] * 2     # fewer rows, but an exact match
             )
 
     monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
 
     tools = tools_mod.SecurityTools()
-    assert tools._resolve_cpe_vendor("redis") == "pivotal_software"
+    assert tools._resolve_cpe("php") == ("php", "php")
 
 
-def test_resolve_cpe_vendor_falls_back_to_static_table_when_nvd_unreachable(monkeypatch):
+def test_resolve_cpe_resolves_the_product_half_not_just_the_vendor(monkeypatch):
+    """NVD's CPE product field often differs from the scanner's name.
+    Live-verified: nmap reports "Apache httpd", whose real CPE product is
+    "http_server" — keeping the caller's own string built
+    apache_httpd:apache_httpd, which matches nothing, so a correct versioned
+    lookup still found zero of the 108 real CVEs for that version."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return _cpe_dict_response([("apache", "http_server")] * 5)
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    assert tools._resolve_cpe("Apache httpd") == ("apache", "http_server")
+
+
+def test_resolve_cpe_queries_with_the_raw_string_not_the_underscored_one(monkeypatch):
+    """keywordSearch is a natural-language text search: live-verified,
+    "apache_httpd" returns 0 results where "apache http server" returns 574.
+    Normalising before querying silently broke every multi-word product."""
+    import secureflow.crew.tools as tools_mod
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return _cpe_dict_response([("apache", "http_server")])
+
+    def _fake_get(url, params=None, **k):
+        seen["keyword"] = (params or {}).get("keywordSearch")
+        return _Resp()
+
+    monkeypatch.setattr(tools_mod.requests, "get", _fake_get)
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools_mod.SecurityTools()._resolve_cpe("Apache httpd")
+    assert "_" not in seen["keyword"], f"queried NVD with {seen['keyword']!r}"
+
+
+def test_resolve_cpe_falls_back_to_static_table_when_nvd_unreachable(monkeypatch):
     import secureflow.crew.tools as tools_mod
 
     def _boom(*a, **k):
@@ -300,10 +347,10 @@ def test_resolve_cpe_vendor_falls_back_to_static_table_when_nvd_unreachable(monk
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
 
     tools = tools_mod.SecurityTools()
-    assert tools._resolve_cpe_vendor("openssh") == "openbsd"
+    assert tools._resolve_cpe("openssh") == ("openbsd", "openssh")
 
 
-def test_resolve_cpe_vendor_falls_back_to_product_name_when_totally_unknown(monkeypatch):
+def test_resolve_cpe_falls_back_to_product_name_when_totally_unknown(monkeypatch):
     """No network, and not in the static table either — must not crash."""
     import secureflow.crew.tools as tools_mod
 
@@ -314,10 +361,32 @@ def test_resolve_cpe_vendor_falls_back_to_product_name_when_totally_unknown(monk
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
 
     tools = tools_mod.SecurityTools()
-    assert tools._resolve_cpe_vendor("some_totally_unknown_product") == "some_totally_unknown_product"
+    assert tools._resolve_cpe("some_totally_unknown_product") == (
+        "some_totally_unknown_product",
+        "some_totally_unknown_product",
+    )
 
 
-def test_resolve_cpe_vendor_caches_and_does_not_requery(monkeypatch):
+def test_resolve_cpe_falls_back_when_the_dictionary_returns_nothing(monkeypatch):
+    """An empty result set is not a resolution — fall back to the static
+    table rather than inventing one."""
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"products": []}
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+
+    tools = tools_mod.SecurityTools()
+    assert tools._resolve_cpe("openssh") == ("openbsd", "openssh")
+
+
+def test_resolve_cpe_caches_and_does_not_requery(monkeypatch):
     import secureflow.crew.tools as tools_mod
 
     calls = []
@@ -337,29 +406,9 @@ def test_resolve_cpe_vendor_caches_and_does_not_requery(monkeypatch):
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
 
     tools = tools_mod.SecurityTools()
-    assert tools._resolve_cpe_vendor("mysql") == "mysql"
-    assert tools._resolve_cpe_vendor("mysql") == "mysql"
+    assert tools._resolve_cpe("mysql") == ("mysql", "mysql")
+    assert tools._resolve_cpe("mysql") == ("mysql", "mysql")
     assert len(calls) == 1, "second call must be served from cache, not re-queried"
-
-
-def test_resolve_cpe_vendor_ignores_no_exact_product_match(monkeypatch):
-    """If nothing in the dictionary response has a matching product field,
-    that's not a resolution — fall back rather than trust an unrelated hit."""
-    import secureflow.crew.tools as tools_mod
-
-    class _Resp:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return _cpe_dict_response([("adobe", "totally_different_product")])
-
-    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
-    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
-
-    tools = tools_mod.SecurityTools()
-    # "php" is in the static fallback table and correct there.
-    assert tools._resolve_cpe_vendor("php") == "php"
 
 
 def test_parse_cve_falls_back_through_cvss_versions():
@@ -648,7 +697,7 @@ def test_cve_lookup_records_possible_confidence_when_cpe_misses_and_keyword_hits
     monkeypatch.setattr(tools_mod.requests, "get", _fake_get)
     monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
     monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
-    monkeypatch.setattr(tools_mod.SecurityTools, "_resolve_cpe_vendor", lambda self, p: "vendor")
+    monkeypatch.setattr(tools_mod.SecurityTools, "_resolve_cpe", lambda self, p: ("vendor", "product"))
 
     tools = tools_mod.SecurityTools()
     result = tools.lookup_cve("some-obscure-product", "1.0")
@@ -970,6 +1019,94 @@ def test_lookup_cve_catches_nmap_ssl_tunnel_notation():
     for label in ("ssl/http", "ssl/https", "ssl/imap", "tls/ftp"):
         result = tools.lookup_cve(label, "")
         assert result["status"] == "insufficient_data", label
+
+
+# ---------------------------------------------------------------------------
+# The agent-facing tools must be able to pass a version at all.
+#
+# Live-verified root cause: the recon agent correctly fingerprinted
+# "Apache httpd 2.4.7" (the genuine banner on scanme.nmap.org) but called
+# lookup_cves("Apache httpd 2.4.7") — because the tool signature had no
+# version parameter, so there was nowhere else to put it. Every lookup the
+# crew could physically make was therefore version-less: fabricated CVEs
+# before the unversioned-lookup guard, and zero findings after it.
+# ---------------------------------------------------------------------------
+
+def test_agent_facing_tools_accept_a_version_argument():
+    import secureflow.crew.tools as tools_mod
+
+    for tool in (tools_mod.lookup_cves, tools_mod.assess_service):
+        fields = set(tool.args_schema.model_fields)
+        assert "version" in fields, f"{tool.name} cannot pass a version: {fields}"
+
+
+def test_lookup_cves_tool_forwards_the_version(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    seen = {}
+    monkeypatch.setattr(
+        tools_mod.security_tools, "lookup_cve",
+        lambda product, version="": seen.update(product=product, version=version) or {"status": "ok"},
+    )
+
+    tools_mod.lookup_cves.run(product="Apache httpd", version="2.4.7")
+    assert seen == {"product": "Apache httpd", "version": "2.4.7"}
+
+
+def test_assess_service_tool_forwards_the_version(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    seen = {}
+    monkeypatch.setattr(
+        tools_mod.security_tools, "assess_vulnerability",
+        lambda port, service, version="": seen.update(
+            port=port, service=service, version=version) or {"status": "ok"},
+    )
+
+    tools_mod.assess_service.run(port="80/tcp", service="Apache httpd", version="2.4.7")
+    assert seen == {"port": "80/tcp", "service": "Apache httpd", "version": "2.4.7"}
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Apache httpd 2.4.7", ("Apache httpd", "2.4.7")),
+        ("nginx 1.18.0", ("nginx", "1.18.0")),
+        ("OpenSSH 8.0p1", ("OpenSSH", "8.0p1")),
+        ("Apache HTTP Server", ("Apache HTTP Server", "")),  # 'Server' is not a version
+        ("nginx", ("nginx", "")),
+        ("", ("", "")),
+    ],
+)
+def test_split_product_version(raw, expected):
+    """A model can always phrase it as one string even with the signature
+    fixed, so a crammed version is recovered rather than thrown away."""
+    from secureflow.crew.tools import _split_product_version
+
+    assert _split_product_version(raw) == expected
+
+
+def test_lookup_cve_recovers_a_crammed_version_instead_of_refusing(monkeypatch):
+    import secureflow.crew.tools as tools_mod
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"vulnerabilities": [], "totalResults": 0}
+
+    monkeypatch.setattr(tools_mod.requests, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(tools_mod, "_osv_lookup", lambda *a, **k: [])
+    monkeypatch.setattr(tools_mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        tools_mod.SecurityTools, "_resolve_cpe", lambda self, p: ("apache", "http_server"))
+
+    result = tools_mod.SecurityTools().lookup_cve("Apache httpd 2.4.7")
+
+    assert result["status"] == "success"
+    assert result["version"] == "2.4.7"
+    assert result["product"] == "Apache httpd"
 
 
 # ---------------------------------------------------------------------------
