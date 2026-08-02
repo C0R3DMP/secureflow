@@ -96,3 +96,52 @@ def test_full_recon_to_cve_pipeline_against_a_real_target():
         # so this should read as insufficient_data — not a crash, not a
         # fabricated finding.
         assert result["risk_level"] in ("unknown", "low", "medium", "high", "critical")
+
+
+def test_versioned_lookup_resolves_a_real_cpe_and_returns_applicable_cves():
+    """The whole point of CVE correlation: a real product+version must resolve
+    to NVD's own CPE and return CVEs that actually apply to that version.
+
+    Guards the three stacked defects found by live testing — the CPE
+    dictionary queried with an underscored string (0 results for anything
+    multi-word), only the vendor half resolved (apache_httpd:apache_httpd
+    matches nothing), and no way for an agent to pass a version at all.
+    """
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    assert tools._resolve_cpe("Apache httpd") == ("apache", "http_server")
+
+    result = tools.lookup_cve("Apache httpd", "2.4.7")
+
+    assert result["status"] == "success"
+    assert result["match_strategy"] == "cpe", "must match by CPE, not fall back to keyword"
+    assert result["cve_count"] > 0
+    # Apache 2.4.7 is from 2013; its CVEs should be of that era, not 1999's.
+    years = [int(c["id"].split("-")[1]) for c in result["cves"] if c["id"].startswith("CVE-")]
+    assert years and min(years) >= 2010, f"got pre-2010 CVEs for a 2013 release: {years}"
+
+
+def test_unversioned_lookup_never_fabricates_against_real_nvd():
+    """No version, or a placeholder, must not reach NVD at all — this is the
+    path that produced 1999-era CVEs for an unfingerprintable service."""
+    from secureflow.crew.tools import SecurityTools
+
+    tools = SecurityTools()
+    for version in ("", "unknown", "n/a"):
+        result = tools.lookup_cve("Apache httpd", version)
+        assert result["status"] == "insufficient_data", version
+        assert result["cve_count"] == 0, version
+    assert tools.get_findings() == []
+
+
+def test_osv_contributes_only_real_cves_not_distro_advisories():
+    """An ecosystem-less OSV query returns mostly distro advisories: live,
+    nginx 1.18.0 yields 417 records of which only ~22 are CVEs."""
+    from secureflow.crew.tools import _osv_lookup
+
+    findings = _osv_lookup("nginx", "1.18.0")
+
+    assert findings, "expected at least some real CVEs for a known-vulnerable version"
+    non_cve = [f["id"] for f in findings if not f["id"].startswith("CVE-")]
+    assert not non_cve, f"distro advisories leaked in as findings: {non_cve[:5]}"
